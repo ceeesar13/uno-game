@@ -396,6 +396,7 @@ const SEATS = { 1: ['t'], 2: ['tl', 'tr'], 3: ['tl', 't', 'tr'] };
 function renderCpuZones(state) {
   const arena = document.getElementById('arena');
   arena.querySelectorAll('.cpu-player').forEach((el) => el.remove());
+  arena.classList.toggle('bot-active', state.currentPlayer !== 0 && state.phase !== 'game-over');
 
   const seats = SEATS[state.players.length - 1] || SEATS[3];
 
@@ -404,6 +405,14 @@ function renderCpuZones(state) {
     const zone = document.createElement('div');
     zone.className = 'cpu-player seat--' + seats[i - 1];
     if (state.currentPlayer === i && state.phase !== 'game-over') zone.classList.add('cpu-player--active');
+    if (thinkingIndex === i) zone.classList.add('cpu-player--thinking');
+
+    if (bubbles[i]) {
+      const bubble = document.createElement('div');
+      bubble.className = 'speech-bubble';
+      bubble.textContent = bubbles[i];
+      zone.appendChild(bubble);
+    }
 
     const head = document.createElement('div');
     head.className = 'cpu-player__head';
@@ -413,6 +422,13 @@ function renderCpuZones(state) {
       `<span class="bot-tag">Bot</span>` +
       `<span class="count-badge">${player.hand.length}</span>`;
     zone.appendChild(head);
+
+    if (thinkingIndex === i) {
+      const think = document.createElement('div');
+      think.className = 'thinking';
+      think.innerHTML = 'pensando<span class="banner__dots"></span>';
+      zone.appendChild(think);
+    }
 
     const fan = document.createElement('div');
     fan.className = 'fan fan--cpu';
@@ -601,6 +617,66 @@ function invalidReason(state) {
   return `No puedes jugar esa carta: el color activo es ${COLOR_NAMES[state.currentColor]} y no coincide en número ni símbolo.`;
 }
 
+// ==== PERSONALITY REACTIONS ====
+// In-character one-liners per play style. Shown occasionally so they add
+// flavor without saturating. Keyed by the CPU's style.
+
+const REACTIONS = {
+  easy: { // Laura — warm, impulsive
+    play: ['¡Uy, esta me sirve!', 'A ver qué tal…', '¡Me encanta esto!'],
+    special: ['¡Ay, perdón!', '¡No era mi intención!', '¡Uy, qué nervios!'],
+    hit: ['¡Ay, no!', 'Bueno, ni modo', '¡Oye, eso dolió!'],
+    draw: ['Otra más, va', 'A robar entonces'],
+    win: ['¡Gané! ¡Qué emoción!'],
+    uno: ['¡Me queda una!'],
+  },
+  aggressive: { // Santiago — competitive, cutting
+    play: ['Así se juega.', 'Sin piedad.', 'Voy con todo.'],
+    special: ['Toma esto.', 'Nada personal.', 'Aguántate.'],
+    hit: ['¿En serio?', 'Me la vas a pagar.', 'Ja, no me afecta.'],
+    draw: ['Tsk. Robo.', 'Paso… por ahora.'],
+    win: ['Obvio. Gané.'],
+    uno: ['Una carta. Se acabó.'],
+  },
+  expert: { // Camila — calm, calculating
+    play: ['Calculado.', 'Justo lo que necesitaba.', 'Previsible.'],
+    special: ['Estaba en mis planes.', 'Lo tenía contemplado.', 'Ya lo verás.'],
+    hit: ['Interesante decisión.', 'Lo esperaba.', 'No cambia nada.'],
+    draw: ['Robo. Sin problema.', 'Ajusto el plan.'],
+    win: ['Como estaba previsto.'],
+    uno: ['Una carta. Todo bajo control.'],
+  },
+};
+
+function pickReaction(player, kind) {
+  const bank = REACTIONS[player.style];
+  if (!bank) return null;
+  const lines = bank[kind] || bank.play;
+  if (!lines || !lines.length) return null;
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
+// Show a speech bubble over a player's seat for a moment. Stored globally so
+// it survives re-renders until it expires.
+function showBubble(playerIndex, text) {
+  bubbles[playerIndex] = text;
+  render(state);
+  setTimeout(() => {
+    if (bubbles[playerIndex] === text) {
+      delete bubbles[playerIndex];
+      render(state);
+    }
+  }, 2000);
+}
+
+// Occasionally react in character to an event.
+function maybeReact(playerIndex, kind, chance) {
+  if (playerIndex === 0) return; // humans don't auto-react
+  if (Math.random() > (chance == null ? 0.5 : chance)) return;
+  const line = pickReaction(state.players[playerIndex], kind);
+  if (line) showBubble(playerIndex, line);
+}
+
 // ==== APP STATE + PERSISTENCE ====
 
 const START_POINTS = 100;
@@ -614,6 +690,13 @@ let prevDiscardId = null;
 let roundPoints = START_POINTS;
 let lastPlaySource = 'human';
 let opponentCount = 1;
+let thinkingIndex = null; // which bot is currently "thinking"
+let bubbles = {}; // player index -> speech-bubble text
+
+// Bot-turn pacing: a deliberate think beat, then the play, so each bot
+// turn reads as a moment instead of a blink.
+const THINK_MS = 750;
+const AFTER_MS = 700;
 
 function loadPersisted() {
   try {
@@ -645,6 +728,8 @@ function newRound() {
   scored = false;
   roundPoints = START_POINTS;
   lastPlaySource = 'human';
+  thinkingIndex = null;
+  bubbles = {};
   prevDiscardId = topOfDiscard(state).id;
   render(state);
 }
@@ -656,26 +741,56 @@ function startGame() {
   document.getElementById('game-screen').hidden = false;
 }
 
-function scheduleCpuIfNeeded() {
-  if (state.phase === 'turn' && state.currentPlayer !== 0 && state.winner === null) {
-    setTimeout(runCpuTurnAndRender, 1000);
-  }
+function isBotTurn() {
+  return state.phase === 'turn' && state.currentPlayer !== 0 && state.winner === null;
 }
 
-function runCpuTurnAndRender() {
+function scheduleCpuIfNeeded() {
+  if (isBotTurn()) setTimeout(beginCpuThinking, AFTER_MS);
+}
+
+// Beat 1: spotlight the bot and show it "thinking".
+function beginCpuThinking() {
+  if (!isBotTurn()) return;
+  thinkingIndex = state.currentPlayer;
+  render(state);
+  setTimeout(resolveCpuTurn, THINK_MS);
+}
+
+// Beat 2: the bot actually plays; narrate it and maybe react.
+function resolveCpuTurn() {
+  thinkingIndex = null;
   const result = runCpuTurn(state);
   lastPlaySource = 'cpu';
   const actorIndex = result.event.playerIndex;
   state = result.state;
   render(state);
+  narrateBotAction(result.event, actorIndex);
 
-  if (result.event.kind === 'play' && result.event.card) {
-    announcePlay(result.event.card, actorIndex, state);
-  } else if (result.event.kind === 'draw-pass') {
-    showToast(`${state.players[actorIndex].name} roba y pasa`, 'special');
+  if (isBotTurn()) setTimeout(beginCpuThinking, AFTER_MS);
+}
+
+// Narrate every bot move so the human can follow the game, plus occasional
+// in-character reactions.
+function narrateBotAction(event, actorIndex) {
+  const actor = state.players[actorIndex];
+
+  if (event.kind === 'draw-pass') {
+    showToast(`${actor.name} roba y pasa`, 'special');
+    maybeReact(actorIndex, 'draw', 0.5);
+    return;
   }
 
-  scheduleCpuIfNeeded();
+  const card = event.card;
+  if (card.type === 'number') {
+    showToast(`${actor.name} juega ${COLOR_NAMES[card.color]} ${card.value}`, 'play');
+    maybeReact(actorIndex, 'play', 0.35);
+  } else {
+    announcePlay(card, actorIndex, state);
+    maybeReact(actorIndex, 'special', 0.7);
+  }
+
+  if (actor.hand.length === 1) maybeReact(actorIndex, 'uno', 0.9);
 }
 
 // The human may attempt ANY card. Judging legality is the player's job — an
@@ -692,12 +807,17 @@ function handlePlayerAttempt(cardId) {
     return;
   }
 
+  const victimIdx = nextIndexFrom(0, state.direction, state.players.length, 1);
+
   lastPlaySource = 'human';
   state = playCard(state, 0, cardId);
   render(state);
 
   if (state.phase === 'color-selection') return; // announce after color chosen
-  if (card.type !== 'number') announcePlay(card, 0, state);
+  if (card.type !== 'number') {
+    announcePlay(card, 0, state);
+    if (card.type === 'draw-two' || card.type === 'skip') maybeReact(victimIdx, 'hit', 0.8);
+  }
   scheduleCpuIfNeeded();
 }
 
@@ -742,10 +862,12 @@ document.querySelectorAll('.color-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
     if (state.phase !== 'color-selection' || state.pendingPlayer !== 0) return;
     const wildType = state.pendingCard.type;
+    const victimIdx = nextIndexFrom(0, state.direction, state.players.length, 1);
     lastPlaySource = 'human';
     state = chooseColor(state, btn.dataset.color);
     render(state);
     announcePlay({ type: wildType }, 0, state);
+    if (wildType === 'wild-draw-four') maybeReact(victimIdx, 'hit', 0.85);
     scheduleCpuIfNeeded();
   });
 });

@@ -616,6 +616,7 @@ body {
 .seat--tr { grid-area: tr; justify-self: end; }
 
 .cpu-player {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -623,9 +624,54 @@ body {
   padding: 0.35rem 0.55rem;
   border-radius: 14px;
   border: 2px solid transparent;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: transform 0.28s ease, border-color 0.25s ease, background 0.25s ease, opacity 0.25s ease;
 }
-.cpu-player--active { border-color: var(--gold); background: rgba(242,193,78,0.10); }
+/* Spotlight the player whose turn it is; fade the rest so it's obvious. */
+.arena.bot-active .cpu-player { opacity: 0.5; transform: scale(0.94); }
+.cpu-player--active {
+  opacity: 1 !important;
+  transform: scale(1.12) !important;
+  border-color: var(--gold);
+  background: rgba(242,193,78,0.12);
+}
+
+.thinking {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: var(--gold);
+  letter-spacing: 0.03em;
+}
+
+.speech-bubble {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  padding: 0.4rem 0.7rem;
+  border-radius: 12px;
+  white-space: nowrap;
+  max-width: 200px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  z-index: 15;
+  animation: pop 0.2s ease;
+}
+.speech-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  border-top-color: #fff;
+}
+@keyframes pop { from { transform: translateX(-50%) scale(0.7); opacity: 0.3; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
 .cpu-player__head { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
 .cpu-player__name { font-family: var(--font-display); font-weight: 700; }
 .avatar {
