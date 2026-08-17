@@ -192,6 +192,15 @@ function chooseColor(state, color) {
   return finalizePlay(cleared, { ...pendingCard, color }, pendingPlayer);
 }
 
+function drawForPlayer(state) {
+  const { drawn, deck, discardPile } = drawCards(state, 1);
+  return { ...state, deck, discardPile, playerHand: [...state.playerHand, ...drawn], hasDrawn: true };
+}
+
+function passTurn(state) {
+  return nextTurnState(state, 'cpu');
+}
+
 function scoreCard(card, opponentHandSize) {
   const baseScores = { number: 1, skip: 3, reverse: 3, 'draw-two': 3, wild: 0, 'wild-draw-four': 0 };
   let score = baseScores[card.type];
@@ -323,11 +332,16 @@ function renderColorPicker(state) {
     !(state.phase === 'color-selection' && state.pendingPlayer === 'player');
 }
 
+function renderPassButton(state) {
+  document.getElementById('pass-btn').hidden = !(state.phase === 'player-turn' && state.hasDrawn);
+}
+
 function render(state) {
   renderHands(state);
   renderPiles(state);
   renderTurnIndicator(state);
   renderColorPicker(state);
+  renderPassButton(state);
 }
 
 // ==== BOOTSTRAP ====
@@ -352,8 +366,19 @@ function handlePlayerPlay(cardId) {
 }
 
 function handleDrawClick() {
-  // implemented in Task 8
+  if (state.phase !== 'player-turn' || state.hasDrawn) return;
+  const validPlays = getValidPlays(state.playerHand, state.currentColor, topOfDiscard(state));
+  if (validPlays.length > 0) return;
+  state = drawForPlayer(state);
+  render(state);
 }
+
+document.getElementById('pass-btn').addEventListener('click', () => {
+  if (state.phase !== 'player-turn' || !state.hasDrawn) return;
+  state = passTurn(state);
+  render(state);
+  setTimeout(runCpuTurnAndRender, 700);
+});
 
 document.querySelectorAll('.color-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
