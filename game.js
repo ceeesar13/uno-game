@@ -404,6 +404,7 @@ function renderCpuZones(state) {
     const player = state.players[i];
     const zone = document.createElement('div');
     zone.className = 'cpu-player seat--' + seats[i - 1];
+    zone.dataset.index = i;
     if (state.currentPlayer === i && state.phase !== 'game-over') zone.classList.add('cpu-player--active');
     if (thinkingIndex === i) zone.classList.add('cpu-player--thinking');
 
@@ -461,14 +462,42 @@ function renderPlayerHand(state) {
 
 function renderPiles(state) {
   const discardEl = document.getElementById('discard-pile');
-  const top = topOfDiscard(state);
   discardEl.innerHTML = '';
-  const el = buildCardElement(top, { faceUp: true });
-  if (top.id !== prevDiscardId) {
-    el.classList.add(lastPlaySource === 'human' ? 'card--fly-player' : 'card--fly-cpu');
-  }
-  discardEl.appendChild(el);
-  prevDiscardId = top.id;
+  discardEl.appendChild(buildCardElement(topOfDiscard(state), { faceUp: true }));
+}
+
+// Animate the just-played card physically travelling from the player who
+// played it to the centre discard, so the table feels real.
+function flyCardToCenter(card, fromEl) {
+  if (!fromEl) return;
+  const discardEl = document.getElementById('discard-pile');
+  const realCard = discardEl.querySelector('.card');
+  const to = discardEl.getBoundingClientRect();
+  const from = fromEl.getBoundingClientRect();
+
+  if (realCard) realCard.style.visibility = 'hidden';
+
+  const clone = buildCardElement(card, { faceUp: true });
+  clone.classList.add('flying-card');
+  clone.style.left = from.left + from.width / 2 + 'px';
+  clone.style.top = from.top + from.height / 2 + 'px';
+  document.body.appendChild(clone);
+
+  requestAnimationFrame(() => {
+    clone.style.left = to.left + to.width / 2 + 'px';
+    clone.style.top = to.top + to.height / 2 + 'px';
+    clone.classList.add('flying-card--landed');
+  });
+
+  setTimeout(() => {
+    clone.remove();
+    if (realCard) realCard.style.visibility = 'visible';
+  }, 440);
+}
+
+function seatElement(playerIndex) {
+  if (playerIndex === 0) return document.getElementById('player-hand');
+  return document.querySelector(`.cpu-player[data-index="${playerIndex}"]`);
 }
 
 function currentName(state) {
@@ -695,8 +724,8 @@ let bubbles = {}; // player index -> speech-bubble text
 
 // Bot-turn pacing: a deliberate think beat, then the play, so each bot
 // turn reads as a moment instead of a blink.
-const THINK_MS = 750;
-const AFTER_MS = 700;
+const THINK_MS = 950;
+const AFTER_MS = 750;
 
 function loadPersisted() {
   try {
@@ -757,7 +786,7 @@ function beginCpuThinking() {
   setTimeout(resolveCpuTurn, THINK_MS);
 }
 
-// Beat 2: the bot actually plays; narrate it and maybe react.
+// Beat 2: the bot actually plays; fly the card in, narrate over its seat.
 function resolveCpuTurn() {
   thinkingIndex = null;
   const result = runCpuTurn(state);
@@ -765,32 +794,43 @@ function resolveCpuTurn() {
   const actorIndex = result.event.playerIndex;
   state = result.state;
   render(state);
+
+  if (result.event.kind === 'play') {
+    flyCardToCenter(topOfDiscard(state), seatElement(actorIndex));
+  }
   narrateBotAction(result.event, actorIndex);
 
   if (isBotTurn()) setTimeout(beginCpuThinking, AFTER_MS);
 }
 
-// Narrate every bot move so the human can follow the game, plus occasional
-// in-character reactions.
+function playLabel(card, state) {
+  switch (card.type) {
+    case 'number': return `${COLOR_NAMES[card.color]} ${card.value}`;
+    case 'draw-two': return '+2';
+    case 'skip': return 'Salto';
+    case 'reverse': return 'Reversa';
+    case 'wild': return `Comodín · ${COLOR_NAMES[state.currentColor]}`;
+    case 'wild-draw-four': return `+4 · ${COLOR_NAMES[state.currentColor]}`;
+    default: return '';
+  }
+}
+
+// Every bot move gets a tooltip OVER that bot's seat (never central), so it's
+// always clear who did what. Specials sometimes carry an in-character quip.
 function narrateBotAction(event, actorIndex) {
   const actor = state.players[actorIndex];
 
   if (event.kind === 'draw-pass') {
-    showToast(`${actor.name} roba y pasa`, 'special');
-    maybeReact(actorIndex, 'draw', 0.5);
+    showBubble(actorIndex, 'Robo y paso');
     return;
   }
 
-  const card = event.card;
-  if (card.type === 'number') {
-    showToast(`${actor.name} juega ${COLOR_NAMES[card.color]} ${card.value}`, 'play');
-    maybeReact(actorIndex, 'play', 0.35);
-  } else {
-    announcePlay(card, actorIndex, state);
-    maybeReact(actorIndex, 'special', 0.7);
+  let text = playLabel(event.card, state);
+  if (event.card.type !== 'number' && Math.random() < 0.65) {
+    const line = pickReaction(actor, 'special');
+    if (line) text += ' · ' + line;
   }
-
-  if (actor.hand.length === 1) maybeReact(actorIndex, 'uno', 0.9);
+  showBubble(actorIndex, text);
 }
 
 // The human may attempt ANY card. Judging legality is the player's job — an
@@ -813,7 +853,8 @@ function handlePlayerAttempt(cardId) {
   state = playCard(state, 0, cardId);
   render(state);
 
-  if (state.phase === 'color-selection') return; // announce after color chosen
+  if (state.phase === 'color-selection') return; // fly + announce after color chosen
+  flyCardToCenter(topOfDiscard(state), seatElement(0));
   if (card.type !== 'number') {
     announcePlay(card, 0, state);
     if (card.type === 'draw-two' || card.type === 'skip') maybeReact(victimIdx, 'hit', 0.8);
@@ -866,6 +907,7 @@ document.querySelectorAll('.color-btn').forEach((btn) => {
     lastPlaySource = 'human';
     state = chooseColor(state, btn.dataset.color);
     render(state);
+    flyCardToCenter(topOfDiscard(state), seatElement(0));
     announcePlay({ type: wildType }, 0, state);
     if (wildType === 'wild-draw-four') maybeReact(victimIdx, 'hit', 0.85);
     scheduleCpuIfNeeded();
