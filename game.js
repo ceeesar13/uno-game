@@ -336,12 +336,22 @@ function renderPassButton(state) {
   document.getElementById('pass-btn').hidden = !(state.phase === 'player-turn' && state.hasDrawn);
 }
 
+function renderGameOver(state) {
+  const el = document.getElementById('game-over');
+  el.hidden = state.phase !== 'game-over';
+  if (state.phase === 'game-over') {
+    document.getElementById('game-over-message').textContent =
+      state.winner === 'player' ? '¡Ganaste!' : 'Ganó la CPU';
+  }
+}
+
 function render(state) {
   renderHands(state);
   renderPiles(state);
   renderTurnIndicator(state);
   renderColorPicker(state);
   renderPassButton(state);
+  renderGameOver(state);
 }
 
 // ==== BOOTSTRAP ====
@@ -389,4 +399,9 @@ document.querySelectorAll('.color-btn').forEach((btn) => {
       setTimeout(runCpuTurnAndRender, 700);
     }
   });
+});
+
+document.getElementById('play-again-btn').addEventListener('click', () => {
+  state = createInitialState();
+  render(state);
 });
