@@ -47,9 +47,21 @@ completo.
 - **Mismas reglas para todos.** La legalidad de una jugada humana se evalúa con
   las mismas funciones del motor que usan los bots: nadie puede saltarse una
   regla que el motor no permita.
+- **Una mesa física con diseño sonoro propio.** Cada carta vuela al jugarse y
+  al robarse (también las penalizaciones de +2/+4 viajan hacia su víctima), el
+  mazo tiene grosor real con contador de cartas, el descarte crece desordenado
+  — y todos los sonidos están **sintetizados en código con la Web Audio API**:
+  cero archivos de audio, jerarquía emocional (un +4 suena más grande que un
+  número) y botón de silencio persistente.
+- **Puntuación oficial y ritmo de mesa.** El ganador de la ronda suma el valor
+  de las manos rivales (números por su valor, acciones 20, comodines 50) rumbo
+  a los 500 de la partida. Cada turno humano tiene 20 segundos visibles: si se
+  agota, robas y pasas. Y abandonar una ronda en curso cuenta como derrota.
 - **Accesible de verdad.** Cartas operables por teclado con nombre accesible,
   anuncios `aria-live` de cada evento, diálogos con gestión de foco,
   `prefers-reduced-motion` respetado y estados que no dependen solo del color.
+  La mano no se pre-filtra: saber qué carta es jugable es parte del juego, y un
+  intento ilegal responde sobre la propia carta con sacudida y ✕.
 - **Reglas de casa acotadas.** Clásico, robar hasta jugar, o acumular +2/+4 —
   elegidas al iniciar, explicadas antes de jugar. Y un modo de partida rápida
   de un clic.

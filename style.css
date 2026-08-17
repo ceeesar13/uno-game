@@ -880,6 +880,47 @@ body {
 .icon-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 .icon-btn--off { opacity: 0.55; text-decoration: line-through; }
 
+/* ---------- Turn timer ---------- */
+.turn-timer {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 999px;
+  padding: 0.15rem 0.7rem;
+}
+.turn-timer[hidden] { display: none; }
+.turn-timer--urgent { color: #fff; border-color: var(--uno-red); background: rgba(228,50,43,0.25); }
+
+/* ---------- Rejected play: shake + ✕ over the attempted card ---------- */
+.card--rejected {
+  animation: reject-shake 0.4s ease;
+  box-shadow: 0 0 0 3px var(--uno-red), 0 6px 12px rgba(0,0,0,0.35);
+}
+.card--rejected::after {
+  content: "✕";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 2.2rem;
+  color: #fff;
+  background: rgba(228,50,43,0.55);
+  border-radius: inherit;
+  z-index: 3;
+}
+@keyframes reject-shake {
+  0%, 100% { translate: 0 0; }
+  20% { translate: -7px 0; }
+  40% { translate: 7px 0; }
+  60% { translate: -5px 0; }
+  80% { translate: 5px 0; }
+}
+
 /* Tactical tells over each bot seat */
 .style-tag {
   font-family: var(--font-display);

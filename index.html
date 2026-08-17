@@ -84,6 +84,7 @@
           </div>
           <button id="mute-btn" class="icon-btn" type="button" aria-pressed="true" aria-label="Silenciar sonido">Sonido</button>
           <button id="history-btn" class="icon-btn" type="button" aria-haspopup="dialog">Historial</button>
+          <button id="quit-btn" class="icon-btn" type="button" aria-haspopup="dialog">Salir</button>
         </div>
       </header>
 
@@ -98,6 +99,7 @@
 
           <div class="status">
             <div id="turn-banner" class="banner" aria-live="polite" aria-atomic="true"></div>
+            <div id="turn-timer" class="turn-timer" hidden></div>
             <div id="color-chip" class="chip" hidden>
               <span class="chip__dot"></span><span id="color-chip-name" class="chip__name"></span>
             </div>
@@ -108,7 +110,7 @@
         <section class="zone zone--player" id="player-zone">
           <div class="zone__label">
             <span id="player-label">Tú</span>
-            <span class="points" aria-label="Puntos"><b id="points">100</b> pts</span>
+            <span class="points" aria-label="Puntos de partida"><b id="points">0</b> pts</span>
           </div>
           <div id="player-hand" class="fan fan--player"></div>
         </section>
@@ -155,8 +157,22 @@
         <div class="game-over__actions">
           <button id="play-again-btn" class="btn btn--primary" type="button">Jugar de nuevo</button>
           <button id="share-btn" class="btn btn--ghost" type="button">Compartir desafío</button>
+          <button id="menu-btn" class="btn btn--ghost" type="button">Volver al menú</button>
         </div>
         <p id="share-out" class="share-out" hidden></p>
+      </div>
+    </div>
+
+    <!-- ============ QUIT CONFIRMATION ============ -->
+    <div id="quit-dialog" class="overlay" role="dialog" aria-modal="true" aria-labelledby="quit-title" hidden>
+      <div class="overlay__panel">
+        <p class="overlay__title" id="quit-title">¿Abandonar la partida?</p>
+        <p class="overlay__sub">Abandonar una ronda en curso cuenta como derrota en el marcador.</p>
+        <div class="game-over__actions">
+          <button id="quit-cancel" class="btn btn--primary" type="button">Seguir jugando</button>
+          <button id="quit-restart" class="btn btn--ghost" type="button">Reiniciar ronda</button>
+          <button id="quit-exit" class="btn btn--ghost" type="button">Salir al menú</button>
+        </div>
       </div>
     </div>
 

@@ -186,6 +186,16 @@ export function normalizeRules(rules) {
 
 // ---- Reading state ----
 
+/** Official UNO scoring value of a hand: numbers at face value, action cards
+ * 20, wilds 50. The round winner collects this from every opponent. */
+export function handPoints(hand) {
+  return hand.reduce((sum, card) => {
+    if (card.type === 'number') return sum + card.value;
+    if (card.type === 'wild' || card.type === 'wild-draw-four') return sum + 50;
+    return sum + 20;
+  }, 0);
+}
+
 export function topOfDiscard(state) {
   return state.discardPile[state.discardPile.length - 1];
 }

@@ -18,6 +18,7 @@ import {
   runCpuTurn,
   buildOpponents,
   hashSeed,
+  handPoints,
 } from './engine.js';
 
 import * as audio from './audio.js';
@@ -228,6 +229,7 @@ function renderPlayerHand(state) {
       el.classList.add('card--playable');
     }
 
+    el.dataset.cardId = card.id;
     el.addEventListener('click', () => handlePlayerAttempt(card.id));
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -370,7 +372,7 @@ function renderPassButton(state) {
 }
 
 function renderPoints() {
-  document.getElementById('points').textContent = roundPoints;
+  document.getElementById('points').textContent = matchTotals.you || 0;
 }
 
 function renderScore() {
@@ -391,6 +393,7 @@ function render(state) {
   renderPoints();
   renderHistoryLive(state);
   renderGameOver(state);
+  manageTurnTimer(state);
   audio.onRender(state);
 }
 
@@ -535,6 +538,7 @@ function buildSummary(state) {
 }
 
 let gameOverFocused = false;
+let lastRoundEarned = 0;
 
 function renderGameOver(state) {
   const el = document.getElementById('game-over');
@@ -544,17 +548,30 @@ function renderGameOver(state) {
   const humanWon = state.winner === 0;
   if (!scored) {
     scores[humanWon ? 'player' : 'cpu'] += 1;
+    // Official scoring: the round winner collects every opponent's hand value.
+    lastRoundEarned = state.players.reduce(
+      (sum, p, i) => (i === state.winner ? sum : sum + handPoints(p.hand)),
+      0
+    );
+    const winnerId = state.players[state.winner].id;
+    matchTotals[winnerId] = (matchTotals[winnerId] || 0) + lastRoundEarned;
     scored = true;
     recordTelemetry(state);
     persist();
     renderScore();
+    renderPoints(); // the chip renders before scoring — refresh it now
   }
 
-  document.getElementById('game-over-message').textContent = humanWon
-    ? `¡Ganaste, ${playerName}!`
-    : `Ganó ${state.players[state.winner].name}`;
+  const winnerId = state.players[state.winner].id;
+  const winnerTotal = matchTotals[winnerId] || 0;
+  const matchWon = winnerTotal >= MATCH_TARGET;
+  const winnerName = humanWon ? playerName : state.players[state.winner].name;
+
+  document.getElementById('game-over-message').textContent = matchWon
+    ? (humanWon ? `🏆 ¡${playerName} gana la partida!` : `🏆 ${winnerName} gana la partida`)
+    : (humanWon ? `¡Ganaste la ronda, ${playerName}!` : `${winnerName} gana la ronda`);
   document.getElementById('game-over-score').textContent =
-    `${playerName} ${scores.player} — ${scores.cpu} Bots · ${roundPoints} pts · ${RULES_NAME[currentRulesKey]}`;
+    `${winnerName} suma ${lastRoundEarned} pts · lleva ${winnerTotal}/${MATCH_TARGET} · ${RULES_NAME[currentRulesKey]}`;
 
   const summaryEl = document.getElementById('game-over-summary');
   summaryEl.innerHTML = '';
@@ -713,6 +730,16 @@ function seatElement(playerIndex) {
   return document.querySelector(`.cpu-player[data-index="${playerIndex}"]`);
 }
 
+// Visible rejection on the attempted card: shake + a ✕ badge. The hand is
+// deliberately NOT pre-filtered — knowing what is playable is part of the
+// game — so an illegal attempt answers on the card itself.
+function rejectCard(cardId) {
+  const el = document.querySelector(`#player-hand .card[data-card-id="${cardId}"]`);
+  if (!el) return;
+  el.classList.add('card--rejected');
+  registerTimer(setTimeout(() => el.classList.remove('card--rejected'), 650));
+}
+
 // Drawn/penalty cards physically travel from the deck to whoever receives
 // them — staggered, face down, capped so a big penalty stays readable.
 function flyDrawnCards(playerIndex, count) {
@@ -742,14 +769,16 @@ function flyDrawnCards(playerIndex, count) {
 
 // ==== APP STATE + PERSISTENCE ====
 
-const START_POINTS = 100;
-const PENALTY = 10;
+// Official UNO match play: the round winner collects the value of every
+// opponent's hand; first to reach the target wins the match.
+const MATCH_TARGET = 500;
+const TURN_SECONDS = 20;
 
 let state = null;
 let playerName = 'Jugador';
 let scores = { player: 0, cpu: 0 };
 let scored = false;
-let roundPoints = START_POINTS;
+let matchTotals = {}; // player id -> accumulated match points
 let opponentCount = 1;
 let currentRulesKey = 'classic';
 let currentSeed = null;
@@ -783,6 +812,8 @@ function loadPersisted() {
     if (savedRules && RULES_BY_KEY[savedRules]) currentRulesKey = savedRules;
     const savedTel = localStorage.getItem('uno.telemetry');
     if (savedTel) telemetry = JSON.parse(savedTel);
+    const savedMatch = localStorage.getItem('uno.match');
+    if (savedMatch) matchTotals = JSON.parse(savedMatch);
   } catch (e) {
     /* localStorage unavailable — play without persistence */
   }
@@ -795,6 +826,7 @@ function persist() {
     localStorage.setItem('uno.opponents', String(opponentCount));
     localStorage.setItem('uno.rules', currentRulesKey);
     localStorage.setItem('uno.telemetry', JSON.stringify(telemetry));
+    localStorage.setItem('uno.match', JSON.stringify(matchTotals));
   } catch (e) {
     /* ignore */
   }
@@ -878,13 +910,34 @@ function newRound() {
   });
   pendingChallenge = null; // consumed; the next round is a fresh game
   scored = false;
-  roundPoints = START_POINTS;
+  // A finished match (someone reached the target) starts fresh totals.
+  if (Object.values(matchTotals).some((v) => v >= MATCH_TARGET)) matchTotals = {};
   thinkingIndex = null;
   bubbles = {};
   drawnCardId = null;
   gameOverFocused = false;
   lastAnnouncedSeq = 0;
   render(state);
+}
+
+// Abandoning a round in progress counts as a loss — quitting is never free.
+function forfeitIfMidRound() {
+  if (state && state.phase !== 'game-over') {
+    scores.cpu += 1;
+    persist();
+    renderScore();
+  }
+}
+
+function exitToMenu() {
+  clearTimers();
+  stopTurnTimer();
+  document.getElementById('quit-dialog').hidden = true;
+  document.getElementById('game-over').hidden = true;
+  document.getElementById('game-screen').hidden = true;
+  document.getElementById('start-screen').hidden = false;
+  state = null;
+  document.getElementById('name-input').focus();
 }
 
 function startGame() {
@@ -898,6 +951,62 @@ function startGame() {
 
 function isBotTurn() {
   return state.phase === 'turn' && state.currentPlayer !== 0 && state.winner === null;
+}
+
+// ==== TURN TIMER ====
+// Official UNO has no clock; digital tables add one so nobody stalls. The
+// penalty is the natural one: time out and you draw a card and pass.
+
+let turnTimer = { intervalId: null, deadline: 0 };
+
+function stopTurnTimer() {
+  if (turnTimer.intervalId) {
+    clearInterval(turnTimer.intervalId);
+    turnTimer.intervalId = null;
+  }
+  const el = document.getElementById('turn-timer');
+  if (el) el.hidden = true;
+}
+
+function manageTurnTimer(state) {
+  const active = state.phase === 'turn' && state.currentPlayer === 0 && state.winner === null;
+  if (!active) {
+    stopTurnTimer();
+    return;
+  }
+  if (turnTimer.intervalId) return; // this turn is already being timed
+
+  const el = document.getElementById('turn-timer');
+  turnTimer.deadline = Date.now() + TURN_SECONDS * 1000;
+  el.hidden = false;
+  const tick = () => {
+    const left = Math.max(0, Math.ceil((turnTimer.deadline - Date.now()) / 1000));
+    el.textContent = `⏱ ${left} s`;
+    el.classList.toggle('turn-timer--urgent', left <= 5);
+    if (left <= 0) {
+      stopTurnTimer();
+      timeoutTurn();
+    }
+  };
+  tick();
+  turnTimer.intervalId = setInterval(tick, 250);
+}
+
+function timeoutTurn() {
+  if (!state || state.phase !== 'turn' || state.currentPlayer !== 0) return;
+  if (state.pendingDraw > 0) {
+    const total = state.pendingDraw;
+    state = absorbPending(state);
+    render(state);
+    showToast(`Tiempo agotado: robas ${total} y pierdes el turno.`, 'bad');
+  } else {
+    if (!state.hasDrawn) state = drawForCurrent(state);
+    state = passTurn(state);
+    render(state);
+    showToast('Tiempo agotado: robas una carta y pasas el turno.', 'bad');
+  }
+  audio.play('error');
+  scheduleCpuIfNeeded();
 }
 
 function scheduleCpuIfNeeded() {
@@ -971,6 +1080,7 @@ function handlePlayerAttempt(cardId) {
   if (state.pendingDraw > 0) {
     if (card.type !== state.pendingDrawType) {
       const label = state.pendingDrawType === 'draw-two' ? '+2' : '+4';
+      rejectCard(cardId);
       audio.play('error');
       showToast(`Acumulado +${state.pendingDraw}: juega otro ${label} o roba ${state.pendingDraw}.`, 'bad');
       return;
@@ -981,6 +1091,7 @@ function handlePlayerAttempt(cardId) {
 
   // After drawing, only the freshly drawn card may be played.
   if (state.hasDrawn && cardId !== drawnCardId) {
+    rejectCard(cardId);
     audio.play('error');
     showToast('Ya robaste: solo puedes jugar la carta robada, o pasar el turno.', 'bad');
     return;
@@ -988,18 +1099,16 @@ function handlePlayerAttempt(cardId) {
 
   // Wild Draw Four is only legal when you hold no card of the active colour.
   if (card.type === 'wild-draw-four' && !canPlayWildDrawFour(state.players[0].hand, state.currentColor)) {
-    roundPoints = Math.max(0, roundPoints - PENALTY);
-    renderPoints();
+    rejectCard(cardId);
     audio.play('error');
-    showToast(`No puedes jugar +4: todavía tienes cartas ${COLOR_NAMES[state.currentColor]}. −${PENALTY} pts`, 'bad');
+    showToast(`No puedes jugar +4: todavía tienes cartas ${COLOR_NAMES[state.currentColor]}.`, 'bad');
     return;
   }
 
   if (!isValidPlay(card, state.currentColor, topOfDiscard(state))) {
-    roundPoints = Math.max(0, roundPoints - PENALTY);
-    renderPoints();
+    rejectCard(cardId);
     audio.play('error');
-    showToast(`${invalidReason(state)} −${PENALTY} pts`, 'bad');
+    showToast(invalidReason(state), 'bad');
     return;
   }
 
@@ -1195,15 +1304,43 @@ document.getElementById('history-btn').addEventListener('click', openHistory);
 document.getElementById('history-close').addEventListener('click', closeHistory);
 document.getElementById('play-again-btn').addEventListener('click', newRound);
 document.getElementById('share-btn').addEventListener('click', shareChallenge);
+document.getElementById('menu-btn').addEventListener('click', exitToMenu);
 
-// Escape closes the history dialog (the colour picker is intentionally not
-// escapable — choosing a colour is mandatory to continue).
+document.getElementById('quit-btn').addEventListener('click', () => {
+  if (!state || state.phase === 'game-over') {
+    exitToMenu();
+    return;
+  }
+  lastFocused = document.activeElement;
+  document.getElementById('quit-dialog').hidden = false;
+  document.getElementById('quit-cancel').focus();
+});
+document.getElementById('quit-cancel').addEventListener('click', () => {
+  document.getElementById('quit-dialog').hidden = true;
+  restoreFocus();
+});
+document.getElementById('quit-restart').addEventListener('click', () => {
+  forfeitIfMidRound();
+  document.getElementById('quit-dialog').hidden = true;
+  newRound();
+});
+document.getElementById('quit-exit').addEventListener('click', () => {
+  forfeitIfMidRound();
+  exitToMenu();
+});
+
+// Escape closes the history and quit dialogs (the colour picker is
+// intentionally not escapable — choosing a colour is mandatory to continue).
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !document.getElementById('history-dialog').hidden) {
-    closeHistory();
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('history-dialog').hidden) closeHistory();
+  if (!document.getElementById('quit-dialog').hidden) {
+    document.getElementById('quit-dialog').hidden = true;
+    restoreFocus();
   }
 });
 
 trapFocus(document.getElementById('color-picker'));
 trapFocus(document.getElementById('game-over'));
 trapFocus(document.getElementById('history-dialog'));
+trapFocus(document.getElementById('quit-dialog'));

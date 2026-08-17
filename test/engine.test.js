@@ -217,3 +217,34 @@ test('drawToMatch keeps drawing until a play exists then plays it', () => {
   const { state } = playToEnd(CONFIG('dtm-1', { drawToMatch: true }));
   assert.equal(state.phase, 'game-over');
 });
+
+// ---- Official UNO scoring: winner collects opponents' hand values ----
+
+import { handPoints } from '../engine.js';
+
+test('number cards are worth their face value', () => {
+  assert.equal(handPoints([
+    { type: 'number', color: 'red', value: 0 },
+    { type: 'number', color: 'blue', value: 7 },
+    { type: 'number', color: 'green', value: 9 },
+  ]), 16);
+});
+
+test('skip, reverse and draw-two are worth 20 each', () => {
+  assert.equal(handPoints([
+    { type: 'skip', color: 'red' },
+    { type: 'reverse', color: 'blue' },
+    { type: 'draw-two', color: 'green' },
+  ]), 60);
+});
+
+test('wild and wild-draw-four are worth 50 each', () => {
+  assert.equal(handPoints([
+    { type: 'wild', color: null },
+    { type: 'wild-draw-four', color: null },
+  ]), 100);
+});
+
+test('an empty hand is worth zero', () => {
+  assert.equal(handPoints([]), 0);
+});
