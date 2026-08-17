@@ -60,7 +60,7 @@
           <div id="discard-pile" class="pile pile--discard" aria-label="Descarte"></div>
 
           <div class="status">
-            <div id="turn-banner" class="banner"></div>
+            <div id="turn-banner" class="banner" aria-live="polite" aria-atomic="true"></div>
             <div id="color-chip" class="chip" hidden>
               <span class="chip__dot"></span><span id="color-chip-name" class="chip__name"></span>
             </div>
@@ -81,9 +81,9 @@
     </section>
 
     <!-- ============ COLOR PICKER ============ -->
-    <div id="color-picker" class="overlay" hidden>
+    <div id="color-picker" class="overlay" role="dialog" aria-modal="true" aria-labelledby="color-picker-title" hidden>
       <div class="overlay__panel">
-        <p class="overlay__title">Elige un color</p>
+        <p class="overlay__title" id="color-picker-title">Elige un color</p>
         <div class="color-grid">
           <button class="color-btn color-btn--red" type="button" data-color="red" aria-label="Rojo"></button>
           <button class="color-btn color-btn--blue" type="button" data-color="blue" aria-label="Azul"></button>
@@ -94,7 +94,7 @@
     </div>
 
     <!-- ============ GAME OVER ============ -->
-    <div id="game-over" class="overlay" hidden>
+    <div id="game-over" class="overlay" role="dialog" aria-modal="true" aria-labelledby="game-over-message" hidden>
       <div class="overlay__panel">
         <p id="game-over-message" class="overlay__title"></p>
         <p id="game-over-score" class="overlay__sub"></p>

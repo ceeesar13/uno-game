@@ -18,7 +18,7 @@
   --paper: #FBFBF7;
   --ink: #131316;
   --txt: #F3F6F4;
-  --muted: #9FBCB1;
+  --muted: #C3D8CF;
 
   --font-display: 'Baloo 2', 'Trebuchet MS', system-ui, sans-serif;
   --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -262,6 +262,10 @@ body {
 }
 .pile--draw .card { transition: transform 0.15s ease; }
 .pile--draw:hover .card { transform: translateY(-6px); }
+.pile--draw:disabled { opacity: 0.4; cursor: not-allowed; }
+.pile--draw:disabled:hover .card { transform: none; }
+.pile--draw:disabled:hover .pile__caption { color: var(--muted); }
+.pile--draw:focus-visible { outline: 3px solid var(--gold); outline-offset: 4px; border-radius: 14px; }
 .pile__caption {
   font-family: var(--font-display);
   font-weight: 700;
@@ -423,6 +427,12 @@ body {
   transform: translateY(-24px) scale(1.05);
   z-index: 30;
   box-shadow: 0 20px 28px rgba(0,0,0,0.5);
+}
+.fan--player .card:focus-visible {
+  outline: 4px solid var(--gold);
+  outline-offset: 3px;
+  transform: translateY(-24px) scale(1.05);
+  z-index: 31;
 }
 .fan--cpu .card {
   transform: rotate(var(--rot, 0deg)) translateY(var(--ty, 0px));

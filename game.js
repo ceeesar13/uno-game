@@ -346,6 +346,19 @@ function cardGlyph(card) {
   return CARD_SYMBOLS[card.type] || '';
 }
 
+function cardAriaLabel(card) {
+  const color = card.color ? COLOR_NAMES[card.color] : '';
+  switch (card.type) {
+    case 'number': return `${color} ${card.value}`;
+    case 'skip': return `${color}, salto`;
+    case 'reverse': return `${color}, reversa`;
+    case 'draw-two': return `${color}, roba dos`;
+    case 'wild': return 'Comodín, elige color';
+    case 'wild-draw-four': return 'Comodín roba cuatro';
+    default: return 'Carta';
+  }
+}
+
 function buildCardElement(card, { faceUp }) {
   const el = document.createElement('div');
   el.className = 'card';
@@ -437,6 +450,7 @@ function renderCpuZones(state) {
 
     const fan = document.createElement('div');
     fan.className = 'fan fan--cpu';
+    fan.setAttribute('aria-hidden', 'true');
     const m = player.hand.length;
     for (let k = 0; k < m; k++) {
       const el = buildCardElement(null, { faceUp: false });
@@ -458,7 +472,17 @@ function renderPlayerHand(state) {
   human.hand.forEach((card, i) => {
     const el = buildCardElement(card, { faceUp: true });
     applyFanTransform(el, i, n, 3, 3.5);
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', cardAriaLabel(card));
+    el.tabIndex = interactive ? 0 : -1;
+    if (!interactive) el.setAttribute('aria-disabled', 'true');
     el.addEventListener('click', () => handlePlayerAttempt(card.id));
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handlePlayerAttempt(card.id);
+      }
+    });
     handEl.appendChild(el);
   });
   handEl.style.pointerEvents = interactive ? 'auto' : 'none';
@@ -466,8 +490,15 @@ function renderPlayerHand(state) {
 
 function renderPiles(state) {
   const discardEl = document.getElementById('discard-pile');
+  const top = topOfDiscard(state);
   discardEl.innerHTML = '';
-  discardEl.appendChild(buildCardElement(topOfDiscard(state), { faceUp: true }));
+  discardEl.appendChild(buildCardElement(top, { faceUp: true }));
+  discardEl.setAttribute('aria-label', 'Carta en juego: ' + cardAriaLabel(top));
+
+  const drawBtn = document.getElementById('draw-pile');
+  const canDraw = state.phase === 'turn' && state.currentPlayer === 0 && !state.hasDrawn;
+  drawBtn.disabled = !canDraw;
+  drawBtn.setAttribute('aria-disabled', String(!canDraw));
 }
 
 // Animate the just-played card physically travelling from the player who
@@ -582,7 +613,12 @@ function renderGameOver(state) {
     ? `¡Ganaste, ${playerName}!`
     : `Ganó ${state.players[state.winner].name}`;
   document.getElementById('game-over-score').textContent =
-    `${playerName} ${scores.player} — ${scores.cpu} CPU · ${roundPoints} pts`;
+    `${playerName} ${scores.player} — ${scores.cpu} Bots · ${roundPoints} pts`;
+
+  if (!gameOverFocused) {
+    document.getElementById('play-again-btn').focus();
+    gameOverFocused = true;
+  }
 }
 
 function render(state) {
@@ -726,6 +762,8 @@ let opponentCount = 1;
 let thinkingIndex = null; // which bot is currently "thinking"
 let bubbles = {}; // player index -> speech-bubble text
 let drawnCardId = null; // after the human draws, only this card may be played
+let lastFocused = null; // restore focus after a modal closes
+let gameOverFocused = false;
 
 // Bot-turn pacing: a deliberate think beat, then the play, so each bot
 // turn reads as a moment instead of a blink.
@@ -765,6 +803,7 @@ function newRound() {
   thinkingIndex = null;
   bubbles = {};
   drawnCardId = null;
+  gameOverFocused = false;
   prevDiscardId = topOfDiscard(state).id;
   render(state);
 }
@@ -873,7 +912,13 @@ function handlePlayerAttempt(cardId) {
   state = playCard(state, 0, cardId);
   render(state);
 
-  if (state.phase === 'color-selection') return; // fly + announce after color chosen
+  if (state.phase === 'color-selection') {
+    // Move focus into the modal for keyboard + screen-reader users.
+    lastFocused = document.activeElement;
+    const firstColor = document.querySelector('#color-picker .color-btn');
+    if (firstColor) firstColor.focus();
+    return; // fly + announce after color chosen
+  }
   flyCardToCenter(topOfDiscard(state), seatElement(0));
   if (card.type !== 'number') {
     announcePlay(card, 0, state);
@@ -889,6 +934,35 @@ function handleDrawClick() {
   drawnCardId = hand[hand.length - 1].id;
   render(state);
   showToast('Robaste una carta. Juégala si puedes o pasa el turno.', 'special');
+}
+
+function restoreFocus() {
+  if (lastFocused && document.body.contains(lastFocused)) {
+    lastFocused.focus();
+  } else {
+    const card = document.querySelector('#player-hand .card');
+    if (card) card.focus();
+  }
+  lastFocused = null;
+}
+
+// Keep Tab focus inside an open modal.
+function trapFocus(overlay) {
+  if (!overlay) return;
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || overlay.hidden) return;
+    const items = overlay.querySelectorAll('button');
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
 }
 
 loadPersisted();
@@ -932,8 +1006,12 @@ document.querySelectorAll('.color-btn').forEach((btn) => {
     flyCardToCenter(topOfDiscard(state), seatElement(0));
     announcePlay({ type: wildType }, 0, state);
     if (wildType === 'wild-draw-four') maybeReact(victimIdx, 'hit', 0.85);
+    restoreFocus();
     scheduleCpuIfNeeded();
   });
 });
 
 document.getElementById('play-again-btn').addEventListener('click', newRound);
+
+trapFocus(document.getElementById('color-picker'));
+trapFocus(document.getElementById('game-over'));
