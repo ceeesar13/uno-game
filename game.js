@@ -141,6 +141,14 @@ function applyEffect(state, card, playerKey) {
       );
     }
 
+    case 'wild-draw-four': {
+      const { drawn, deck, discardPile } = drawCards(state, 4);
+      return nextTurnState(
+        { ...state, deck, discardPile, [opponentHandKey]: [...state[opponentHandKey], ...drawn] },
+        playerKey
+      );
+    }
+
     default:
       return nextTurnState(state, opponentKey);
   }
@@ -169,8 +177,19 @@ function playCard(state, playerKey, cardId) {
   const hand = state[handKey];
   const card = hand.find((c) => c.id === cardId);
   const newHand = hand.filter((c) => c.id !== cardId);
+  const next = { ...state, [handKey]: newHand };
 
-  return finalizePlay({ ...state, [handKey]: newHand }, card, playerKey);
+  if (card.type === 'wild' || card.type === 'wild-draw-four') {
+    return { ...next, pendingCard: card, pendingPlayer: playerKey, phase: 'color-selection' };
+  }
+
+  return finalizePlay(next, card, playerKey);
+}
+
+function chooseColor(state, color) {
+  const { pendingCard, pendingPlayer } = state;
+  const cleared = { ...state, pendingCard: null, pendingPlayer: null };
+  return finalizePlay(cleared, { ...pendingCard, color }, pendingPlayer);
 }
 
 // ==== RENDER ====
@@ -182,6 +201,12 @@ function render(state) {
   const top = topOfDiscard(state);
   document.getElementById('discard-pile').textContent = `${top.color || 'wild'}-${top.type}${top.value ?? ''}`;
   document.getElementById('turn-indicator').textContent = state.phase;
+  renderColorPicker(state);
+}
+
+function renderColorPicker(state) {
+  document.getElementById('color-picker').hidden =
+    !(state.phase === 'color-selection' && state.pendingPlayer === 'player');
 }
 
 // ==== BOOTSTRAP ====
@@ -196,4 +221,12 @@ document.getElementById('discard-pile').addEventListener('click', () => {
     state = playCard(state, 'player', valid.id);
     render(state);
   }
+});
+
+document.querySelectorAll('.color-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (state.phase !== 'color-selection' || state.pendingPlayer !== 'player') return;
+    state = chooseColor(state, btn.dataset.color);
+    render(state);
+  });
 });
