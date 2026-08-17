@@ -20,6 +20,9 @@ import {
   hashSeed,
 } from './engine.js';
 
+import * as audio from './audio.js';
+import { drawFlightsFor, deckDepth, underStack } from './anim.js';
+
 // ==== RENDER CONSTANTS ====
 
 const COLOR_NAMES = { red: 'Rojo', blue: 'Azul', green: 'Verde', yellow: 'Amarillo' };
@@ -267,6 +270,14 @@ function renderPiles(state) {
   const discardEl = document.getElementById('discard-pile');
   const top = topOfDiscard(state);
   discardEl.innerHTML = '';
+  // The messy pile: recent discards peek out under the top card, each with a
+  // stable rotation, so the stack visibly grows as the game goes on.
+  for (const { card, rot } of underStack(state.discardPile, 4)) {
+    const el = buildCardElement(card, { faceUp: true });
+    el.classList.add('card--under');
+    el.style.setProperty('--under-rot', rot + 'deg');
+    discardEl.appendChild(el);
+  }
   discardEl.appendChild(buildCardElement(top, { faceUp: true }));
   discardEl.setAttribute('aria-label', 'Carta en juego: ' + cardAriaLabel(top));
 
@@ -274,6 +285,18 @@ function renderPiles(state) {
   const caption = document.getElementById('draw-caption');
   const myTurn = state.phase === 'turn' && state.currentPlayer === 0;
   const pending = state.pendingDraw > 0;
+
+  // The deck reads as a physical stack: thickness follows the cards left.
+  const back = drawBtn.querySelector('.card--back');
+  if (back) {
+    const depth = deckDepth(state.deck.length);
+    let shadow = '0 6px 12px rgba(0,0,0,0.35)';
+    for (let i = 1; i <= depth; i++) {
+      shadow += `, ${(-i * 1.7).toFixed(1)}px ${(i * 1.7).toFixed(1)}px 0 -1px #101014`;
+      shadow += `, ${(-i * 1.7).toFixed(1)}px ${(i * 1.7).toFixed(1)}px 0 0 rgba(255,255,255,0.3)`;
+    }
+    back.style.boxShadow = shadow;
+  }
 
   const canDraw = myTurn && (pending || !state.hasDrawn);
   drawBtn.disabled = !canDraw;
@@ -283,8 +306,8 @@ function renderPiles(state) {
     caption.textContent = `Robar ${state.pendingDraw}`;
     drawBtn.setAttribute('aria-label', `Robar ${state.pendingDraw} cartas y perder el turno`);
   } else {
-    caption.textContent = 'Robar';
-    drawBtn.setAttribute('aria-label', 'Robar una carta');
+    caption.textContent = `Robar · ${state.deck.length}`;
+    drawBtn.setAttribute('aria-label', `Robar una carta (quedan ${state.deck.length} en el mazo)`);
   }
 }
 
@@ -368,6 +391,7 @@ function render(state) {
   renderPoints();
   renderHistoryLive(state);
   renderGameOver(state);
+  audio.onRender(state);
 }
 
 // ==== HISTORY: on-screen log + screen-reader announcements ====
@@ -415,9 +439,15 @@ let lastAnnouncedSeq = 0;
 // keep the (currently open) history list in sync.
 function renderHistoryLive(state) {
   const fresh = state.history.filter((e) => e.seq > lastAnnouncedSeq);
-  const lines = fresh.map((e) => eventSentence(e, state)).filter(Boolean);
-  if (lines.length) {
-    document.getElementById('sr-live').textContent = lines.join(' ');
+  if (fresh.length) {
+    // One integration point covers every draw: human, bot, +2/+4 victims,
+    // stack absorptions, and draw-to-match chains.
+    for (const flight of drawFlightsFor(fresh)) {
+      flyDrawnCards(flight.player, flight.count);
+      audio.play('draw');
+    }
+    const lines = fresh.map((e) => eventSentence(e, state)).filter(Boolean);
+    if (lines.length) document.getElementById('sr-live').textContent = lines.join(' ');
     lastAnnouncedSeq = state.seq;
   }
   if (!document.getElementById('history-dialog').hidden) renderHistoryList(state);
@@ -654,7 +684,7 @@ function maybeReact(playerIndex, kind, chance) {
 function flyCardToCenter(card, fromEl) {
   if (!fromEl) return;
   const discardEl = document.getElementById('discard-pile');
-  const realCard = discardEl.querySelector('.card');
+  const realCard = discardEl.querySelector('.card:not(.card--under)');
   const to = discardEl.getBoundingClientRect();
   const from = fromEl.getBoundingClientRect();
 
@@ -681,6 +711,33 @@ function flyCardToCenter(card, fromEl) {
 function seatElement(playerIndex) {
   if (playerIndex === 0) return document.getElementById('player-hand');
   return document.querySelector(`.cpu-player[data-index="${playerIndex}"]`);
+}
+
+// Drawn/penalty cards physically travel from the deck to whoever receives
+// them — staggered, face down, capped so a big penalty stays readable.
+function flyDrawnCards(playerIndex, count) {
+  const drawEl = document.getElementById('draw-pile');
+  const toEl = seatElement(playerIndex);
+  if (!drawEl || !toEl) return;
+  const from = drawEl.getBoundingClientRect();
+  const to = toEl.getBoundingClientRect();
+  const n = Math.min(count, 4);
+
+  for (let k = 0; k < n; k++) {
+    registerTimer(setTimeout(() => {
+      const clone = buildCardElement(null, { faceUp: false });
+      clone.classList.add('flying-card');
+      clone.style.left = from.left + from.width / 2 + 'px';
+      clone.style.top = from.top + from.height / 2 + 'px';
+      document.body.appendChild(clone);
+      requestAnimationFrame(() => {
+        clone.style.left = to.left + to.width / 2 + 'px';
+        clone.style.top = to.top + to.height / 2 + 'px';
+        clone.classList.add('flying-card--landed');
+      });
+      registerTimer(setTimeout(() => clone.remove(), 460));
+    }, k * 110));
+  }
 }
 
 // ==== APP STATE + PERSISTENCE ====
@@ -809,6 +866,7 @@ function shareChallenge() {
 
 function newRound() {
   clearTimers();
+  audio.resetTransitions();
   // A shared challenge fixes the seed; otherwise each round gets fresh entropy.
   const seed = pendingChallenge ? pendingChallenge.seed : String(hashSeed('' + Date.now() + ':' + Math.random()));
   currentSeed = seed;
@@ -863,6 +921,7 @@ function resolveCpuTurn() {
 
   if (result.event.kind === 'play') {
     flyCardToCenter(topOfDiscard(state), seatElement(actorIndex));
+    audio.playCard(result.event.card);
   }
   narrateBotAction(result.event, actorIndex);
 
@@ -912,6 +971,7 @@ function handlePlayerAttempt(cardId) {
   if (state.pendingDraw > 0) {
     if (card.type !== state.pendingDrawType) {
       const label = state.pendingDrawType === 'draw-two' ? '+2' : '+4';
+      audio.play('error');
       showToast(`Acumulado +${state.pendingDraw}: juega otro ${label} o roba ${state.pendingDraw}.`, 'bad');
       return;
     }
@@ -921,6 +981,7 @@ function handlePlayerAttempt(cardId) {
 
   // After drawing, only the freshly drawn card may be played.
   if (state.hasDrawn && cardId !== drawnCardId) {
+    audio.play('error');
     showToast('Ya robaste: solo puedes jugar la carta robada, o pasar el turno.', 'bad');
     return;
   }
@@ -929,6 +990,7 @@ function handlePlayerAttempt(cardId) {
   if (card.type === 'wild-draw-four' && !canPlayWildDrawFour(state.players[0].hand, state.currentColor)) {
     roundPoints = Math.max(0, roundPoints - PENALTY);
     renderPoints();
+    audio.play('error');
     showToast(`No puedes jugar +4: todavía tienes cartas ${COLOR_NAMES[state.currentColor]}. −${PENALTY} pts`, 'bad');
     return;
   }
@@ -936,6 +998,7 @@ function handlePlayerAttempt(cardId) {
   if (!isValidPlay(card, state.currentColor, topOfDiscard(state))) {
     roundPoints = Math.max(0, roundPoints - PENALTY);
     renderPoints();
+    audio.play('error');
     showToast(`${invalidReason(state)} −${PENALTY} pts`, 'bad');
     return;
   }
@@ -955,6 +1018,7 @@ function commitHumanPlay(card, cardId) {
     return; // fly + announce after colour chosen
   }
   flyCardToCenter(topOfDiscard(state), seatElement(0));
+  audio.playCard(card);
   if (card.type !== 'number') {
     announcePlay(card, 0, state);
     if (card.type === 'draw-two' || card.type === 'skip') maybeReact(victimIdx, 'hit', 0.8);
@@ -1032,6 +1096,22 @@ function closeHistory() {
 
 loadPersisted();
 readChallengeFromUrl();
+audio.init();
+
+const muteBtn = document.getElementById('mute-btn');
+function syncMuteButton() {
+  const on = !audio.isMuted();
+  muteBtn.setAttribute('aria-pressed', String(on));
+  muteBtn.setAttribute('aria-label', on ? 'Silenciar sonido' : 'Activar sonido');
+  muteBtn.textContent = on ? 'Sonido' : 'Silencio';
+  muteBtn.classList.toggle('icon-btn--off', !on);
+}
+muteBtn.addEventListener('click', () => {
+  audio.setMuted(!audio.isMuted());
+  if (!audio.isMuted()) audio.play('turn'); // audible confirmation
+  syncMuteButton();
+});
+syncMuteButton();
 
 const nameInput = document.getElementById('name-input');
 if (playerName && playerName !== 'Jugador') nameInput.value = playerName;
@@ -1103,6 +1183,7 @@ document.querySelectorAll('.color-btn').forEach((btn) => {
     state = chooseColor(state, btn.dataset.color);
     render(state);
     flyCardToCenter(topOfDiscard(state), seatElement(0));
+    audio.playCard({ type: wildType });
     announcePlay({ type: wildType }, 0, state);
     if (wildType === 'wild-draw-four' && state.rules.stacking === false) maybeReact(victimIdx, 'hit', 0.85);
     restoreFocus();

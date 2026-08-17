@@ -476,7 +476,16 @@ body {
 }
 
 /* discard emphasis + fly-in from whoever played the card */
+.pile--discard { position: relative; }
 .pile--discard .card { box-shadow: 0 10px 22px rgba(0,0,0,0.45); }
+.pile--discard > .card:not(.card--under) { position: relative; z-index: 2; }
+.pile--discard .card--under {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  transform: rotate(var(--under-rot, 0deg));
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
 .card--fly-player { animation: fly-player 0.36s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .card--fly-cpu { animation: fly-cpu 0.36s cubic-bezier(0.2, 0.8, 0.2, 1); }
 
@@ -869,6 +878,7 @@ body {
 }
 .icon-btn:hover { background: rgba(255,255,255,0.2); border-color: var(--gold); }
 .icon-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.icon-btn--off { opacity: 0.55; text-decoration: line-through; }
 
 /* Tactical tells over each bot seat */
 .style-tag {
