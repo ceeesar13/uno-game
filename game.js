@@ -192,6 +192,69 @@ function chooseColor(state, color) {
   return finalizePlay(cleared, { ...pendingCard, color }, pendingPlayer);
 }
 
+function scoreCard(card, opponentHandSize) {
+  const baseScores = { number: 1, skip: 3, reverse: 3, 'draw-two': 3, wild: 0, 'wild-draw-four': 0 };
+  let score = baseScores[card.type];
+
+  const disruptive = card.type === 'skip' || card.type === 'reverse' || card.type === 'draw-two' || card.type === 'wild-draw-four';
+  if (opponentHandSize <= 2 && disruptive) {
+    score += 5;
+  }
+
+  return score;
+}
+
+function chooseCpuColor(hand) {
+  const counts = { red: 0, blue: 0, green: 0, yellow: 0 };
+  for (const card of hand) {
+    if (card.color) counts[card.color] += 1;
+  }
+  return Object.keys(counts).reduce((best, color) => (counts[color] > counts[best] ? color : best), 'red');
+}
+
+function getCpuMove(state) {
+  const validPlays = getValidPlays(state.cpuHand, state.currentColor, topOfDiscard(state));
+  if (validPlays.length === 0) return { action: 'draw' };
+
+  const best = validPlays.reduce(
+    (best, card) => {
+      const score = scoreCard(card, state.playerHand.length);
+      return score > best.score ? { card, score } : best;
+    },
+    { card: null, score: -Infinity }
+  );
+
+  return { action: 'play', card: best.card };
+}
+
+function drawForCpu(state) {
+  const { drawn, deck, discardPile } = drawCards(state, 1);
+  return { ...state, deck, discardPile, cpuHand: [...state.cpuHand, ...drawn] };
+}
+
+function playCpuCard(state, card) {
+  let next = playCard(state, 'cpu', card.id);
+  if (next.phase === 'color-selection') {
+    next = chooseColor(next, chooseCpuColor(state.cpuHand));
+  }
+  return next;
+}
+
+function runCpuTurn(state) {
+  const move = getCpuMove(state);
+
+  if (move.action === 'draw') {
+    const drawn = drawForCpu(state);
+    const stillValid = getValidPlays(drawn.cpuHand, drawn.currentColor, topOfDiscard(drawn));
+    if (stillValid.length === 0) {
+      return nextTurnState(drawn, 'player');
+    }
+    return playCpuCard(drawn, stillValid[0]);
+  }
+
+  return playCpuCard(state, move.card);
+}
+
 // ==== RENDER ====
 
 function cardLabel(card) {
@@ -272,9 +335,20 @@ function render(state) {
 let state = createInitialState();
 render(state);
 
+function runCpuTurnAndRender() {
+  state = runCpuTurn(state);
+  render(state);
+  if (state.phase === 'cpu-turn' && state.winner === null) {
+    setTimeout(runCpuTurnAndRender, 700);
+  }
+}
+
 function handlePlayerPlay(cardId) {
   state = playCard(state, 'player', cardId);
   render(state);
+  if (state.phase === 'cpu-turn') {
+    setTimeout(runCpuTurnAndRender, 700);
+  }
 }
 
 function handleDrawClick() {
@@ -286,5 +360,8 @@ document.querySelectorAll('.color-btn').forEach((btn) => {
     if (state.phase !== 'color-selection' || state.pendingPlayer !== 'player') return;
     state = chooseColor(state, btn.dataset.color);
     render(state);
+    if (state.phase === 'cpu-turn') {
+      setTimeout(runCpuTurnAndRender, 700);
+    }
   });
 });
