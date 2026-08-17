@@ -22,32 +22,66 @@ Static site: `index.html` + `style.css` + `game.js`. No frameworks, no dependenc
 
 ## Components
 
-- **`index.html`** — page structure: player hand, CPU hand (face-down count), draw pile, discard pile, active color indicator, turn indicator, win/lose banner.
+- **`index.html`** — page structure: player hand, CPU hand (face-down count), draw pile, discard pile, active color indicator, turn indicator, win/lose banner, color-picker overlay.
 - **`style.css`** — UNO card styling (red/blue/green/yellow), responsive layout for the table and hands.
-- **`game.js`** — game state, deck construction/shuffle, dealing, turn management, move validation, special-card effects, CPU decision logic, rendering/DOM updates.
+- **`game.js`** — contains two clearly separated concerns, in this order:
+  - **Engine** (pure, no DOM access): deck construction/shuffle, dealing, move validation, effect resolution, draw logic, win detection, CPU decision logic. Every engine function takes state in and returns/mutates state out — none of them touch `document`.
+  - **Render** (DOM only): reads the current state and updates the DOM to match it. Never mutates game state, never contains rules logic.
+  - A single event-handling layer glues the two: DOM click → engine call → render(state).
+
+## Card Model
+
+Every card is `{ id, color, type, value }`:
+- `id`: unique string (for keying/animating DOM elements).
+- `color`: `'red' | 'blue' | 'green' | 'yellow' | null` (`null` for Wild/Wild Draw Four until a color is chosen).
+- `type`: `'number' | 'skip' | 'reverse' | 'draw-two' | 'wild' | 'wild-draw-four'`.
+- `value`: `0`–`9` for `type: 'number'`, otherwise `null`.
 
 ## Data Flow
 
-Game state lives in a single JS object: `deck`, `playerHand`, `cpuHand`, `discardPile`, `currentColor`, `turn`, `direction`. Player actions (clicking a card, drawing) validate against the top of the discard pile, mutate state, then trigger a re-render of the affected DOM regions. After the player's turn resolves, the CPU takes its turn on a short delay (for readability) and the cycle repeats until one hand is empty.
+Game state lives in a single JS object: `deck`, `playerHand`, `cpuHand`, `discardPile`, `currentColor`, `phase`, `winner`. No `direction` field — with exactly two players, Reverse and Skip are behaviorally identical (see Special Cards), so tracking direction would have no observable effect.
+
+`phase` drives what interaction is valid at any moment:
+- `'player-turn'` — player may click a valid card or draw.
+- `'cpu-turn'` — no player interaction; CPU move runs on a short delay.
+- `'color-selection'` — a Wild/Wild Draw Four was just played; player (or CPU) is choosing the next color; all other clicks are ignored.
+- `'game-over'` — game ended; only the "play again" action is valid.
+
+Render reads `phase` to enable/disable interaction — e.g., player hand clicks are only wired up while `phase === 'player-turn'`.
 
 ## Special Cards
 
-Standard 108-card UNO deck: number cards (0–9, two of each color except one 0), Skip, Reverse, Draw Two per color, plus Wild and Wild Draw Four. Effects: Skip (next player loses turn — in 2-player, acts as "play again"), Reverse (in 2-player, acts as Skip), Draw Two (next player draws 2 and loses turn), Wild (current player picks new active color), Wild Draw Four (next player draws 4, loses turn, color is chosen).
+Standard 108-card UNO deck: number cards (0–9, two of each color except one 0), Skip, Reverse, Draw Two per color, plus Wild and Wild Draw Four.
+
+**Turn resolution is a single centralized flow**, run every time any card is played (by either side):
+1. Remove card from hand, place on discard pile.
+2. Update `currentColor` (from the card's color, or from the chosen color for Wilds).
+3. Apply the card's effect (see below).
+4. Check win condition (hand empty → `phase = 'game-over'`).
+5. If not over, set `phase` to whoever plays next.
+
+Effects:
+- **Skip**: next player loses their turn — in 2-player, the current player effectively plays again.
+- **Reverse**: with 2 players, identical to Skip (direction has no other player to flip to).
+- **Draw Two**: next player draws 2 cards and loses their turn.
+- **Wild**: `phase = 'color-selection'` until a color is chosen, then normal turn order resumes.
+- **Wild Draw Four**: can only be played if the player has **no card matching the current active color** in hand (checked at validation time, before the card is offered as playable). If legal, next player draws 4 and loses their turn, and `phase = 'color-selection'` for the color pick. No challenge/bluff mechanic (out of scope).
 
 ## CPU Logic
 
-Simple heuristic, not random:
-1. If a valid card exists in hand, prefer playing a special card (Skip/Reverse/+2) over a plain number when it's advantageous (e.g., player has few cards).
-2. Otherwise play any valid card, preferring to match color over number when multiple options exist (keeps deck diversity down).
-3. When playing a Wild, choose the color the CPU holds the most of in its remaining hand.
-4. If no valid card, draw one; play it immediately if it becomes playable, else pass.
+Score-based, not random. For each valid card in hand, compute a score and play the highest:
+- Base score by type: number cards lowest, Skip/Reverse/Draw Two higher, Wilds lowest of all (reserve them for when no other option exists).
+- Bonus to Skip/Reverse/Draw Two when the opponent's hand is small (denies them a near-win turn).
+- When a Wild/Wild Draw Four is played, color is chosen as whichever color the CPU holds the most of in its remaining hand.
+- If no valid card exists, draw one; if it's playable, play it immediately (no "hold and pass" choice for the CPU — see Edge Cases); otherwise the turn passes.
 
 ## Edge Cases
 
 - **Deck exhausted while drawing**: reshuffle the discard pile (excluding the top card) back into the draw pile.
-- **Player has no valid move**: forced to draw one card; play it if valid, otherwise turn passes.
-- **Simultaneous empty-hand edge case**: not possible — turns are sequential, so only one hand can reach zero first.
-- **Win condition**: first player (human or CPU) to reach zero cards wins; game shows a banner and offers "play again" (resets state, no page reload needed).
+- **Player has no valid move**: player draws one card. The drawn card is added to their hand and rendered; if it's playable the player may choose to play it or pass (stays in `'player-turn'` either way until they act). This gives the human agency the CPU doesn't need.
+- **CPU has no valid move**: CPU draws one card and auto-plays it immediately if valid, otherwise passes — no decision point needed since there's no UI to drive.
+- **Game start**: after dealing, draw the first discard card. If it is anything other than `type: 'number'`, return it to the deck, reshuffle, and draw again. This guarantees a plain numbered start and avoids implementing start-of-game exceptions for specials.
+- **Win condition**: first player (human or CPU) to reach zero cards wins; `phase = 'game-over'`, game shows a banner and offers "play again" (resets state in place, no page reload needed).
 
 ## Testing
 
