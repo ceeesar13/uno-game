@@ -1,334 +1,26 @@
-// ==== ENGINE ====
-// Pure game rules for N players (2-4). No DOM access lives here.
-// Players are an ordered array; index 0 is always the human.
+// ==== APP / UI ====
+// The DOM layer. All pure game rules live in engine.js; this file only renders
+// state, animates, announces, and translates user input into engine moves.
 
-const COLORS = ['red', 'blue', 'green', 'yellow'];
+import {
+  COLORS,
+  createInitialState,
+  isValidPlay,
+  canPlayWildDrawFour,
+  getValidPlays,
+  topOfDiscard,
+  nextIndexFrom,
+  playCard,
+  chooseColor,
+  drawForCurrent,
+  passTurn,
+  absorbPending,
+  runCpuTurn,
+  buildOpponents,
+  hashSeed,
+} from './engine.js';
 
-function createCard(id, color, type, value) {
-  return { id, color, type, value };
-}
-
-function createDeck() {
-  const deck = [];
-  let idCounter = 0;
-
-  for (const color of COLORS) {
-    deck.push(createCard(`c${idCounter++}`, color, 'number', 0));
-    for (let n = 1; n <= 9; n++) {
-      deck.push(createCard(`c${idCounter++}`, color, 'number', n));
-      deck.push(createCard(`c${idCounter++}`, color, 'number', n));
-    }
-    for (let i = 0; i < 2; i++) {
-      deck.push(createCard(`c${idCounter++}`, color, 'skip', null));
-      deck.push(createCard(`c${idCounter++}`, color, 'reverse', null));
-      deck.push(createCard(`c${idCounter++}`, color, 'draw-two', null));
-    }
-  }
-
-  for (let i = 0; i < 4; i++) {
-    deck.push(createCard(`c${idCounter++}`, null, 'wild', null));
-    deck.push(createCard(`c${idCounter++}`, null, 'wild-draw-four', null));
-  }
-
-  return deck;
-}
-
-function shuffleDeck(deck) {
-  const shuffled = [...deck];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-}
-
-function mod(n, m) {
-  return ((n % m) + m) % m;
-}
-
-function nextIndexFrom(idx, direction, count, steps) {
-  return mod(idx + direction * steps, count);
-}
-
-function giveCards(players, idx, cards) {
-  return players.map((p, i) => (i === idx ? { ...p, hand: [...p.hand, ...cards] } : p));
-}
-
-// config: { humanName, opponents: [{ id, name, isHuman:false, personalityKey, style }] }
-function createInitialState(config) {
-  let deck = shuffleDeck(createDeck());
-
-  const players = [{ id: 'you', name: config.humanName, isHuman: true, hand: [] }];
-  for (const opp of config.opponents) {
-    players.push({ ...opp, isHuman: false, hand: [] });
-  }
-
-  for (const player of players) {
-    player.hand = deck.splice(0, 7);
-  }
-
-  let firstCard = deck.pop();
-  while (firstCard.type !== 'number') {
-    deck.unshift(firstCard);
-    deck = shuffleDeck(deck);
-    firstCard = deck.pop();
-  }
-
-  return {
-    deck,
-    players,
-    currentPlayer: 0,
-    direction: 1,
-    discardPile: [firstCard],
-    currentColor: firstCard.color,
-    phase: 'turn', // 'turn' | 'color-selection' | 'game-over'
-    winner: null, // player index
-    hasDrawn: false,
-    pendingCard: null,
-    pendingPlayer: null,
-  };
-}
-
-function topOfDiscard(state) {
-  return state.discardPile[state.discardPile.length - 1];
-}
-
-function isValidPlay(card, currentColor, topCard) {
-  if (card.type === 'wild' || card.type === 'wild-draw-four') return true;
-  if (card.color === currentColor) return true;
-  if (card.type === 'number' && topCard.type === 'number' && card.value === topCard.value) return true;
-  if (card.type !== 'number' && card.type === topCard.type) return true;
-  return false;
-}
-
-function canPlayWildDrawFour(hand, currentColor) {
-  return !hand.some((c) => c.color === currentColor);
-}
-
-function getValidPlays(hand, currentColor, topCard) {
-  return hand.filter((card) => {
-    if (card.type === 'wild-draw-four') return canPlayWildDrawFour(hand, currentColor);
-    return isValidPlay(card, currentColor, topCard);
-  });
-}
-
-function drawCards(state, count) {
-  let { deck, discardPile } = state;
-  const drawn = [];
-
-  for (let i = 0; i < count; i++) {
-    if (deck.length === 0) {
-      const top = discardPile[discardPile.length - 1];
-      const rest = discardPile.slice(0, -1);
-      deck = shuffleDeck(rest);
-      discardPile = [top];
-    }
-    if (deck.length === 0) break;
-    drawn.push(deck[deck.length - 1]);
-    deck = deck.slice(0, -1);
-  }
-
-  return { drawn, deck, discardPile };
-}
-
-// Advance the turn, applying the played card's effect. Returns new state.
-function applyEffect(state, card, playerIndex) {
-  const n = state.players.length;
-  const dir = state.direction;
-  const victim = nextIndexFrom(playerIndex, dir, n, 1);
-
-  switch (card.type) {
-    case 'skip':
-      return { ...state, currentPlayer: nextIndexFrom(playerIndex, dir, n, 2), hasDrawn: false };
-
-    case 'reverse': {
-      if (n === 2) {
-        // With two players, reverse acts as skip (current player goes again).
-        return { ...state, currentPlayer: nextIndexFrom(playerIndex, dir, n, 2), hasDrawn: false };
-      }
-      const newDir = -dir;
-      return {
-        ...state,
-        direction: newDir,
-        currentPlayer: nextIndexFrom(playerIndex, newDir, n, 1),
-        hasDrawn: false,
-      };
-    }
-
-    case 'draw-two': {
-      const { drawn, deck, discardPile } = drawCards(state, 2);
-      return {
-        ...state,
-        deck,
-        discardPile,
-        players: giveCards(state.players, victim, drawn),
-        currentPlayer: nextIndexFrom(playerIndex, dir, n, 2),
-        hasDrawn: false,
-      };
-    }
-
-    case 'wild-draw-four': {
-      const { drawn, deck, discardPile } = drawCards(state, 4);
-      return {
-        ...state,
-        deck,
-        discardPile,
-        players: giveCards(state.players, victim, drawn),
-        currentPlayer: nextIndexFrom(playerIndex, dir, n, 2),
-        hasDrawn: false,
-      };
-    }
-
-    default:
-      return { ...state, currentPlayer: nextIndexFrom(playerIndex, dir, n, 1), hasDrawn: false };
-  }
-}
-
-function finalizePlay(state, card, playerIndex) {
-  const next = {
-    ...state,
-    discardPile: [...state.discardPile, card],
-    currentColor: card.color,
-  };
-
-  if (next.players[playerIndex].hand.length === 0) {
-    return { ...next, phase: 'game-over', winner: playerIndex };
-  }
-
-  return applyEffect(next, card, playerIndex);
-}
-
-function playCard(state, playerIndex, cardId) {
-  const player = state.players[playerIndex];
-  const card = player.hand.find((c) => c.id === cardId);
-  const newHand = player.hand.filter((c) => c.id !== cardId);
-  const players = state.players.map((p, i) => (i === playerIndex ? { ...p, hand: newHand } : p));
-  const next = { ...state, players };
-
-  if (card.type === 'wild' || card.type === 'wild-draw-four') {
-    return { ...next, pendingCard: card, pendingPlayer: playerIndex, phase: 'color-selection' };
-  }
-
-  return finalizePlay(next, card, playerIndex);
-}
-
-function chooseColor(state, color) {
-  const { pendingCard, pendingPlayer } = state;
-  const cleared = { ...state, pendingCard: null, pendingPlayer: null, phase: 'turn' };
-  return finalizePlay(cleared, { ...pendingCard, color }, pendingPlayer);
-}
-
-function drawForCurrent(state) {
-  const idx = state.currentPlayer;
-  const { drawn, deck, discardPile } = drawCards(state, 1);
-  return { ...state, deck, discardPile, players: giveCards(state.players, idx, drawn), hasDrawn: true };
-}
-
-function passTurn(state) {
-  const n = state.players.length;
-  return {
-    ...state,
-    currentPlayer: nextIndexFrom(state.currentPlayer, state.direction, n, 1),
-    hasDrawn: false,
-  };
-}
-
-// ==== CPU STRATEGY (per personality style) ====
-
-function chooseCpuColor(hand) {
-  const counts = { red: 0, blue: 0, green: 0, yellow: 0 };
-  for (const card of hand) {
-    if (card.color) counts[card.color] += 1;
-  }
-  return Object.keys(counts).reduce((best, color) => (counts[color] > counts[best] ? color : best), 'red');
-}
-
-const SPECIAL_TYPES = ['skip', 'reverse', 'draw-two', 'wild-draw-four'];
-
-// Score a candidate card given the CPU's play style. Higher = more preferred.
-function scoreCardForStyle(card, style, state, playerIndex) {
-  const n = state.players.length;
-  const nextIdx = nextIndexFrom(playerIndex, state.direction, n, 1);
-  const nextLow = state.players[nextIdx].hand.length <= 2;
-  const isWild = card.type === 'wild' || card.type === 'wild-draw-four';
-
-  if (style === 'easy') {
-    // Plays with little strategy — essentially the luck of the draw.
-    return Math.random();
-  }
-
-  if (style === 'aggressive') {
-    if (card.type === 'draw-two' || card.type === 'wild-draw-four') return 10;
-    if (card.type === 'skip' || card.type === 'reverse') return 8;
-    if (card.type === 'number') return 2 + (card.value || 0) / 20;
-    return 1; // plain wild — dump it
-  }
-
-  // expert: reserve wilds, hit players who are close to winning, keep the deck lean
-  if (card.type === 'wild-draw-four') return nextLow ? 9 : 0.6;
-  if (card.type === 'wild') return 0.5;
-  if (SPECIAL_TYPES.includes(card.type)) return nextLow ? 9 : 4;
-  return 5; // numbers preferred to conserve specials
-}
-
-function chooseCpuCard(validPlays, state, playerIndex, style) {
-  return validPlays.reduce(
-    (best, card) => {
-      const score = scoreCardForStyle(card, style, state, playerIndex);
-      return score > best.score ? { card, score } : best;
-    },
-    { card: null, score: -Infinity }
-  ).card;
-}
-
-function playCpuCard(state, playerIndex, card) {
-  let next = playCard(state, playerIndex, card.id);
-  if (next.phase === 'color-selection') {
-    next = chooseColor(next, chooseCpuColor(state.players[playerIndex].hand));
-  }
-  return next;
-}
-
-// Runs the current CPU's whole turn. Returns { state, event } so the app can
-// animate and announce. event.kind: 'play' | 'draw-pass'.
-function runCpuTurn(state) {
-  const idx = state.currentPlayer;
-  const style = state.players[idx].style;
-  const valid = getValidPlays(state.players[idx].hand, state.currentColor, topOfDiscard(state));
-
-  if (valid.length === 0) {
-    // Official rule: draw one, then you may only play THAT card (if legal).
-    const drawn = drawForCurrent(state);
-    const hand = drawn.players[idx].hand;
-    const drawnCard = hand[hand.length - 1];
-    const legal = drawnCard && (drawnCard.type === 'wild-draw-four'
-      ? canPlayWildDrawFour(hand, drawn.currentColor)
-      : isValidPlay(drawnCard, drawn.currentColor, topOfDiscard(drawn)));
-    if (legal) {
-      return { state: playCpuCard(drawn, idx, drawnCard), event: { kind: 'play', card: drawnCard, playerIndex: idx, drew: true } };
-    }
-    return { state: passTurn(drawn), event: { kind: 'draw-pass', playerIndex: idx } };
-  }
-
-  const card = chooseCpuCard(valid, state, idx, style);
-  return { state: playCpuCard(state, idx, card), event: { kind: 'play', card, playerIndex: idx } };
-}
-
-// ==== PERSONALITIES (roster) ====
-// Human names, each with an inherent play style. A "Bot" badge marks them in
-// the UI so they're never confused with real humans later.
-
-const ROSTER = [
-  { id: 'cpu-laura', name: 'Laura', initial: 'L', style: 'easy' },
-  { id: 'cpu-santiago', name: 'Santiago', initial: 'S', style: 'aggressive' },
-  { id: 'cpu-camila', name: 'Camila', initial: 'C', style: 'expert' },
-];
-
-function buildOpponents(count) {
-  return ROSTER.slice(0, count).map((p) => ({ ...p }));
-}
-
-// ==== RENDER ====
+// ==== RENDER CONSTANTS ====
 
 const COLOR_NAMES = { red: 'Rojo', blue: 'Azul', green: 'Verde', yellow: 'Amarillo' };
 const COLOR_VARS = {
@@ -336,6 +28,9 @@ const COLOR_VARS = {
   green: 'var(--uno-green)', yellow: 'var(--uno-yellow)',
 };
 const CARD_SYMBOLS = { skip: '⊘', reverse: '⇄', 'draw-two': '+2', 'wild-draw-four': '+4' };
+const STYLE_LABELS = { easy: 'Impulsiva', aggressive: 'Agresivo', expert: 'Calculadora' };
+const RULES_BY_KEY = { classic: {}, drawToMatch: { drawToMatch: true }, stacking: { stacking: true } };
+const RULES_NAME = { classic: 'Clásico', drawToMatch: 'Robar hasta jugar', stacking: 'Acumular +2/+4' };
 
 function isWildCard(card) {
   return card.type === 'wild' || card.type === 'wild-draw-four';
@@ -358,6 +53,21 @@ function cardAriaLabel(card) {
     default: return 'Carta';
   }
 }
+
+// Human-readable label for a played card (used in log / narration).
+function cardText(card, activeColor) {
+  switch (card.type) {
+    case 'number': return `${COLOR_NAMES[card.color]} ${card.value}`;
+    case 'draw-two': return `${COLOR_NAMES[card.color]} +2`;
+    case 'skip': return `salto ${COLOR_NAMES[card.color]}`;
+    case 'reverse': return `reversa ${COLOR_NAMES[card.color]}`;
+    case 'wild': return `comodín (${COLOR_NAMES[card.color || activeColor]})`;
+    case 'wild-draw-four': return `+4 (${COLOR_NAMES[card.color || activeColor]})`;
+    default: return 'una carta';
+  }
+}
+
+// ==== CARD ELEMENTS ====
 
 function buildCardElement(card, { faceUp }) {
   const el = document.createElement('div');
@@ -406,8 +116,7 @@ function applyFanTransform(el, index, count, spread, drop) {
   el.style.setProperty('--ty', (Math.abs(offset) * drop).toFixed(1) + 'px');
 }
 
-// Seat placement around the table by opponent count. The human sits at the
-// bottom; bots take the corners / top so it reads like a real table.
+// Seat placement around the table by opponent count.
 const SEATS = { 1: ['t'], 2: ['tl', 'tr'], 3: ['tl', 't', 'tr'] };
 
 function renderCpuZones(state) {
@@ -434,12 +143,42 @@ function renderCpuZones(state) {
 
     const head = document.createElement('div');
     head.className = 'cpu-player__head';
-    head.innerHTML =
-      `<span class="avatar">${player.initial}</span>` +
-      `<span class="cpu-player__name">${player.name}</span>` +
-      `<span class="bot-tag">Bot</span>` +
-      `<span class="count-badge">${player.hand.length}</span>`;
+
+    const avatar = document.createElement('span');
+    avatar.className = 'avatar';
+    avatar.textContent = player.initial;
+    head.appendChild(avatar);
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'cpu-player__name';
+    nameEl.textContent = player.name;
+    head.appendChild(nameEl);
+
+    const botTag = document.createElement('span');
+    botTag.className = 'bot-tag';
+    botTag.textContent = 'Bot';
+    head.appendChild(botTag);
+
+    const count = document.createElement('span');
+    count.className = 'count-badge';
+    count.textContent = String(player.hand.length);
+    head.appendChild(count);
+
     zone.appendChild(head);
+
+    // Tactical tell: a readable style label so behaviour maps to identity.
+    const styleTag = document.createElement('span');
+    styleTag.className = 'style-tag';
+    styleTag.textContent = STYLE_LABELS[player.style] || '';
+    zone.appendChild(styleTag);
+
+    // Tactical tell: a visible warning when a rival is about to win.
+    if (state.phase !== 'game-over' && player.hand.length <= 2) {
+      const warn = document.createElement('span');
+      warn.className = 'uno-warn' + (player.hand.length === 1 ? ' uno-warn--one' : '');
+      warn.textContent = player.hand.length === 1 ? '¡UNO!' : '2 cartas';
+      zone.appendChild(warn);
+    }
 
     if (thinkingIndex === i) {
       const think = document.createElement('div');
@@ -465,6 +204,7 @@ function renderCpuZones(state) {
 function renderPlayerHand(state) {
   const human = state.players[0];
   const interactive = state.phase === 'turn' && state.currentPlayer === 0;
+  const validIds = interactive ? new Set(getValidPlays(state, 0).map((c) => c.id)) : new Set();
 
   const handEl = document.getElementById('player-hand');
   handEl.innerHTML = '';
@@ -475,7 +215,16 @@ function renderPlayerHand(state) {
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', cardAriaLabel(card));
     el.tabIndex = interactive ? 0 : -1;
-    if (!interactive) el.setAttribute('aria-disabled', 'true');
+
+    if (!interactive) {
+      el.classList.add('card--off');
+      el.setAttribute('aria-disabled', 'true');
+    } else if (validIds.has(card.id)) {
+      // Positive affordance: mark the legal plays without disabling the rest,
+      // so an illegal attempt still teaches (with its point penalty).
+      el.classList.add('card--playable');
+    }
+
     el.addEventListener('click', () => handlePlayerAttempt(card.id));
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -486,6 +235,32 @@ function renderPlayerHand(state) {
     handEl.appendChild(el);
   });
   handEl.style.pointerEvents = interactive ? 'auto' : 'none';
+  fitHand(handEl, n);
+}
+
+// Tighten the fan just enough that N cards fit the available width, so large
+// hands never overflow the viewport. Beyond the overlap cap, fall back to a
+// scrollable strip (keeps every card reachable via keyboard/touch).
+function fitHand(handEl, n) {
+  if (n <= 1) {
+    handEl.style.removeProperty('--overlap');
+    handEl.classList.remove('fan--scroll');
+    return;
+  }
+  requestAnimationFrame(() => {
+    const sample = handEl.querySelector('.card');
+    if (!sample) return;
+    const cw = sample.offsetWidth || 60;
+    const avail = handEl.clientWidth - 8;
+    const DEFAULT = -0.42;
+    const CAP = -0.72; // never overlap past this — keeps a usable sliver
+    const step = (avail - cw) / ((n - 1) * cw); // = 1 + overlap
+    let overlap = step - 1;
+    const needsScroll = overlap < CAP;
+    overlap = Math.min(DEFAULT, Math.max(CAP, overlap));
+    handEl.style.setProperty('--overlap', overlap.toFixed(3));
+    handEl.classList.toggle('fan--scroll', needsScroll);
+  });
 }
 
 function renderPiles(state) {
@@ -496,43 +271,21 @@ function renderPiles(state) {
   discardEl.setAttribute('aria-label', 'Carta en juego: ' + cardAriaLabel(top));
 
   const drawBtn = document.getElementById('draw-pile');
-  const canDraw = state.phase === 'turn' && state.currentPlayer === 0 && !state.hasDrawn;
+  const caption = document.getElementById('draw-caption');
+  const myTurn = state.phase === 'turn' && state.currentPlayer === 0;
+  const pending = state.pendingDraw > 0;
+
+  const canDraw = myTurn && (pending || !state.hasDrawn);
   drawBtn.disabled = !canDraw;
   drawBtn.setAttribute('aria-disabled', String(!canDraw));
-}
 
-// Animate the just-played card physically travelling from the player who
-// played it to the centre discard, so the table feels real.
-function flyCardToCenter(card, fromEl) {
-  if (!fromEl) return;
-  const discardEl = document.getElementById('discard-pile');
-  const realCard = discardEl.querySelector('.card');
-  const to = discardEl.getBoundingClientRect();
-  const from = fromEl.getBoundingClientRect();
-
-  if (realCard) realCard.style.visibility = 'hidden';
-
-  const clone = buildCardElement(card, { faceUp: true });
-  clone.classList.add('flying-card');
-  clone.style.left = from.left + from.width / 2 + 'px';
-  clone.style.top = from.top + from.height / 2 + 'px';
-  document.body.appendChild(clone);
-
-  requestAnimationFrame(() => {
-    clone.style.left = to.left + to.width / 2 + 'px';
-    clone.style.top = to.top + to.height / 2 + 'px';
-    clone.classList.add('flying-card--landed');
-  });
-
-  setTimeout(() => {
-    clone.remove();
-    if (realCard) realCard.style.visibility = 'visible';
-  }, 440);
-}
-
-function seatElement(playerIndex) {
-  if (playerIndex === 0) return document.getElementById('player-hand');
-  return document.querySelector(`.cpu-player[data-index="${playerIndex}"]`);
+  if (pending && myTurn) {
+    caption.textContent = `Robar ${state.pendingDraw}`;
+    drawBtn.setAttribute('aria-label', `Robar ${state.pendingDraw} cartas y perder el turno`);
+  } else {
+    caption.textContent = 'Robar';
+    drawBtn.setAttribute('aria-label', 'Robar una carta');
+  }
 }
 
 function currentName(state) {
@@ -546,10 +299,18 @@ function renderBanner(state) {
   if (state.phase === 'turn') {
     if (state.currentPlayer === 0) {
       banner.classList.add('banner--you');
-      banner.textContent = `Te toca, ${state.players[0].name}`;
+      if (state.pendingDraw > 0) {
+        banner.textContent = `Te toca — acumulado +${state.pendingDraw}`;
+      } else {
+        banner.textContent = `Te toca, ${state.players[0].name}`;
+      }
     } else {
       banner.classList.add('banner--cpu');
-      banner.innerHTML = `Juega ${currentName(state)}<span class="banner__dots"></span>`;
+      banner.innerHTML = '';
+      banner.append(`Juega ${currentName(state)}`);
+      const dots = document.createElement('span');
+      dots.className = 'banner__dots';
+      banner.appendChild(dots);
     }
   } else if (state.phase === 'color-selection') {
     if (state.pendingPlayer === 0) {
@@ -582,7 +343,7 @@ function renderColorPicker(state) {
 
 function renderPassButton(state) {
   document.getElementById('pass-btn').hidden =
-    !(state.phase === 'turn' && state.currentPlayer === 0 && state.hasDrawn);
+    !(state.phase === 'turn' && state.currentPlayer === 0 && state.hasDrawn && state.pendingDraw === 0);
 }
 
 function renderPoints() {
@@ -596,31 +357,6 @@ function renderScore() {
   document.getElementById('player-label').textContent = playerName;
 }
 
-function renderGameOver(state) {
-  const el = document.getElementById('game-over');
-  el.hidden = state.phase !== 'game-over';
-  if (state.phase !== 'game-over') return;
-
-  const humanWon = state.winner === 0;
-  if (!scored) {
-    scores[humanWon ? 'player' : 'cpu'] += 1;
-    scored = true;
-    persist();
-    renderScore();
-  }
-
-  document.getElementById('game-over-message').textContent = humanWon
-    ? `¡Ganaste, ${playerName}!`
-    : `Ganó ${state.players[state.winner].name}`;
-  document.getElementById('game-over-score').textContent =
-    `${playerName} ${scores.player} — ${scores.cpu} Bots · ${roundPoints} pts`;
-
-  if (!gameOverFocused) {
-    document.getElementById('play-again-btn').focus();
-    gameOverFocused = true;
-  }
-}
-
 function render(state) {
   renderCpuZones(state);
   renderPlayerHand(state);
@@ -630,10 +366,184 @@ function render(state) {
   renderColorPicker(state);
   renderPassButton(state);
   renderPoints();
+  renderHistoryLive(state);
   renderGameOver(state);
 }
 
-// ==== TOASTS ====
+// ==== HISTORY: on-screen log + screen-reader announcements ====
+
+function nameOf(state, i) {
+  return i === 0 ? 'Tú' : state.players[i].name;
+}
+
+// Turn a structured engine event into a Spanish sentence. Returns null for
+// events we don't surface.
+function eventSentence(event, state) {
+  switch (event.type) {
+    case 'start':
+      return `Sale ${cardText(event.card, event.color)}.`;
+    case 'play': {
+      const who = event.player === 0 ? 'Juegas' : `${state.players[event.player].name} juega`;
+      return `${who} ${cardText(event.card, event.color)}.`;
+    }
+    case 'penalty': {
+      const cause = event.cause === 'stack' ? 'acumulado' : event.cause === 'wild-draw-four' ? '+4' : '+2';
+      return `${nameOf(state, event.player)} roba ${event.count} (${cause}).`;
+    }
+    case 'skip':
+      return `${nameOf(state, event.player)} pierde el turno.`;
+    case 'reverse':
+      return 'Cambia el sentido del juego.';
+    case 'draw':
+      return `${nameOf(state, event.player)} roba una carta.`;
+    case 'pass':
+      return `${nameOf(state, event.player)} pasa el turno.`;
+    case 'reshuffle':
+      return 'Se rebaraja el mazo.';
+    case 'stack':
+      return `${nameOf(state, event.player)} enfrenta un acumulado de +${event.total}.`;
+    case 'win':
+      return `${nameOf(state, event.player)} gana la partida.`;
+    default:
+      return null;
+  }
+}
+
+let lastAnnouncedSeq = 0;
+
+// Announce every new event since the last render through the live region, and
+// keep the (currently open) history list in sync.
+function renderHistoryLive(state) {
+  const fresh = state.history.filter((e) => e.seq > lastAnnouncedSeq);
+  const lines = fresh.map((e) => eventSentence(e, state)).filter(Boolean);
+  if (lines.length) {
+    document.getElementById('sr-live').textContent = lines.join(' ');
+    lastAnnouncedSeq = state.seq;
+  }
+  if (!document.getElementById('history-dialog').hidden) renderHistoryList(state);
+}
+
+function renderHistoryList(state) {
+  const list = document.getElementById('history-list');
+  list.innerHTML = '';
+  for (const event of state.history) {
+    const sentence = eventSentence(event, state);
+    if (!sentence) continue;
+    const li = document.createElement('li');
+    li.textContent = sentence;
+    list.appendChild(li);
+  }
+  list.scrollTop = list.scrollHeight;
+}
+
+// ==== GAME OVER + THREE-MOMENT SUMMARY ====
+
+// Build three honest, history-derived takeaways. No invented motivations.
+function buildSummary(state) {
+  const out = [];
+  const players = state.players;
+
+  // 1) The single biggest swing: the largest draw penalty inflicted, credited
+  //    to whoever played the card just before it.
+  let biggest = null;
+  state.history.forEach((e, i) => {
+    if (e.type === 'penalty' && (!biggest || e.count > biggest.count)) {
+      // Find the play that caused it (nearest preceding play).
+      let cause = null;
+      for (let j = i - 1; j >= 0; j--) {
+        if (state.history[j].type === 'play') { cause = state.history[j]; break; }
+      }
+      biggest = { ...e, by: cause ? cause.player : null };
+    }
+  });
+  if (biggest) {
+    const victim = biggest.player === 0 ? 'ti' : state.players[biggest.player].name;
+    if (biggest.by != null && biggest.by !== biggest.player) {
+      out.push(biggest.by === 0
+        ? `El golpe que más pesó: le hiciste robar ${biggest.count} a ${victim}.`
+        : `El golpe que más pesó: ${state.players[biggest.by].name} hizo robar ${biggest.count} a ${victim}.`);
+    } else {
+      out.push(biggest.player === 0
+        ? `El golpe que más pesó: tuviste que robar ${biggest.count}.`
+        : `El golpe que más pesó: ${state.players[biggest.player].name} tuvo que robar ${biggest.count}.`);
+    }
+  } else {
+    out.push('Partida limpia: nadie encajó penalizaciones grandes.');
+  }
+
+  // 2) A readable rival pattern: the bot that leaned hardest on special cards.
+  const specials = players.map((p, i) =>
+    i === 0 ? -1 : state.history.filter((e) => e.type === 'play' && e.player === i && e.card.type !== 'number').length
+  );
+  let topBot = 1;
+  for (let i = 2; i < players.length; i++) if (specials[i] > specials[topBot]) topBot = i;
+  if (players.length > 1 && specials[topBot] > 0) {
+    const desc = {
+      easy: 'jugó a instinto, sin reservar cartas',
+      aggressive: 'presionó con cartas de ataque',
+      expert: 'guardó los comodines para el momento justo',
+    }[players[topBot].style] || 'siguió su estilo';
+    out.push(`Patrón para leer: ${players[topBot].name} ${desc} (${specials[topBot]} especiales).`);
+  } else {
+    out.push('Patrón para leer: esta vez casi todo se jugó con números.');
+  }
+
+  // 3) A concrete alternative for next time, derived from YOUR play.
+  const yourDraws = state.history.filter((e) => e.type === 'draw' && e.player === 0).length;
+  const hitOnYou = state.history.filter((e) => e.type === 'penalty' && e.player === 0).reduce((a, e) => a + e.count, 0);
+  if (state.winner === 0) {
+    out.push('Para la próxima: sube a más bots y prueba una regla de casa.');
+  } else if (hitOnYou >= 6) {
+    out.push('Para la próxima: cambia de color antes de quedar sin salidas y guarda un comodín de defensa.');
+  } else if (yourDraws >= 5) {
+    out.push('Para la próxima: conserva números de varios colores para no depender del mazo.');
+  } else {
+    out.push('Para la próxima: retén una carta de ataque (+2/salto) para el jugador que esté por ganar.');
+  }
+
+  return out;
+}
+
+let gameOverFocused = false;
+
+function renderGameOver(state) {
+  const el = document.getElementById('game-over');
+  el.hidden = state.phase !== 'game-over';
+  if (state.phase !== 'game-over') return;
+
+  const humanWon = state.winner === 0;
+  if (!scored) {
+    scores[humanWon ? 'player' : 'cpu'] += 1;
+    scored = true;
+    recordTelemetry(state);
+    persist();
+    renderScore();
+  }
+
+  document.getElementById('game-over-message').textContent = humanWon
+    ? `¡Ganaste, ${playerName}!`
+    : `Ganó ${state.players[state.winner].name}`;
+  document.getElementById('game-over-score').textContent =
+    `${playerName} ${scores.player} — ${scores.cpu} Bots · ${roundPoints} pts · ${RULES_NAME[currentRulesKey]}`;
+
+  const summaryEl = document.getElementById('game-over-summary');
+  summaryEl.innerHTML = '';
+  for (const line of buildSummary(state)) {
+    const li = document.createElement('li');
+    li.textContent = line;
+    summaryEl.appendChild(li);
+  }
+
+  document.getElementById('share-out').hidden = true;
+
+  if (!gameOverFocused) {
+    lastFocused = null;
+    document.getElementById('play-again-btn').focus();
+    gameOverFocused = true;
+  }
+}
+
+// ==== TOASTS + PLAY ANNOUNCEMENTS ====
 
 let toastTimer = null;
 
@@ -648,8 +558,6 @@ function showToast(message, kind) {
   }, 1900);
 }
 
-// Announce a special/superpower card. `actor` is the player index. `state` is
-// AFTER the play. Number cards stay silent.
 function announcePlay(card, actorIndex, state) {
   const actor = state.players[actorIndex];
   const byHuman = actorIndex === 0;
@@ -687,11 +595,9 @@ function invalidReason(state) {
 }
 
 // ==== PERSONALITY REACTIONS ====
-// In-character one-liners per play style. Shown occasionally so they add
-// flavor without saturating. Keyed by the CPU's style.
 
 const REACTIONS = {
-  easy: { // Laura — warm, impulsive
+  easy: {
     play: ['¡Uy, esta me sirve!', 'A ver qué tal…', '¡Me encanta esto!'],
     special: ['¡Ay, perdón!', '¡No era mi intención!', '¡Uy, qué nervios!'],
     hit: ['¡Ay, no!', 'Bueno, ni modo', '¡Oye, eso dolió!'],
@@ -699,7 +605,7 @@ const REACTIONS = {
     win: ['¡Gané! ¡Qué emoción!'],
     uno: ['¡Me queda una!'],
   },
-  aggressive: { // Santiago — competitive, cutting
+  aggressive: {
     play: ['Así se juega.', 'Sin piedad.', 'Voy con todo.'],
     special: ['Toma esto.', 'Nada personal.', 'Aguántate.'],
     hit: ['¿En serio?', 'Me la vas a pagar.', 'Ja, no me afecta.'],
@@ -707,7 +613,7 @@ const REACTIONS = {
     win: ['Obvio. Gané.'],
     uno: ['Una carta. Se acabó.'],
   },
-  expert: { // Camila — calm, calculating
+  expert: {
     play: ['Calculado.', 'Justo lo que necesitaba.', 'Previsible.'],
     special: ['Estaba en mis planes.', 'Lo tenía contemplado.', 'Ya lo verás.'],
     hit: ['Interesante decisión.', 'Lo esperaba.', 'No cambia nada.'],
@@ -725,25 +631,56 @@ function pickReaction(player, kind) {
   return lines[Math.floor(Math.random() * lines.length)];
 }
 
-// Show a speech bubble over a player's seat for a moment. Stored globally so
-// it survives re-renders until it expires.
 function showBubble(playerIndex, text) {
   bubbles[playerIndex] = text;
   render(state);
-  setTimeout(() => {
+  registerTimer(setTimeout(() => {
     if (bubbles[playerIndex] === text) {
       delete bubbles[playerIndex];
       render(state);
     }
-  }, 2000);
+  }, 2000));
 }
 
-// Occasionally react in character to an event.
 function maybeReact(playerIndex, kind, chance) {
-  if (playerIndex === 0) return; // humans don't auto-react
+  if (playerIndex === 0) return;
   if (Math.random() > (chance == null ? 0.5 : chance)) return;
   const line = pickReaction(state.players[playerIndex], kind);
   if (line) showBubble(playerIndex, line);
+}
+
+// ==== ANIMATION ====
+
+function flyCardToCenter(card, fromEl) {
+  if (!fromEl) return;
+  const discardEl = document.getElementById('discard-pile');
+  const realCard = discardEl.querySelector('.card');
+  const to = discardEl.getBoundingClientRect();
+  const from = fromEl.getBoundingClientRect();
+
+  if (realCard) realCard.style.visibility = 'hidden';
+
+  const clone = buildCardElement(card, { faceUp: true });
+  clone.classList.add('flying-card');
+  clone.style.left = from.left + from.width / 2 + 'px';
+  clone.style.top = from.top + from.height / 2 + 'px';
+  document.body.appendChild(clone);
+
+  requestAnimationFrame(() => {
+    clone.style.left = to.left + to.width / 2 + 'px';
+    clone.style.top = to.top + to.height / 2 + 'px';
+    clone.classList.add('flying-card--landed');
+  });
+
+  registerTimer(setTimeout(() => {
+    clone.remove();
+    if (realCard) realCard.style.visibility = 'visible';
+  }, 440));
+}
+
+function seatElement(playerIndex) {
+  if (playerIndex === 0) return document.getElementById('player-hand');
+  return document.querySelector(`.cpu-player[data-index="${playerIndex}"]`);
 }
 
 // ==== APP STATE + PERSISTENCE ====
@@ -755,20 +692,27 @@ let state = null;
 let playerName = 'Jugador';
 let scores = { player: 0, cpu: 0 };
 let scored = false;
-let prevDiscardId = null;
 let roundPoints = START_POINTS;
-let lastPlaySource = 'human';
 let opponentCount = 1;
-let thinkingIndex = null; // which bot is currently "thinking"
-let bubbles = {}; // player index -> speech-bubble text
-let drawnCardId = null; // after the human draws, only this card may be played
-let lastFocused = null; // restore focus after a modal closes
-let gameOverFocused = false;
+let currentRulesKey = 'classic';
+let currentSeed = null;
+let quickMode = false;
+let thinkingIndex = null;
+let bubbles = {};
+let drawnCardId = null;
+let lastFocused = null;
+let telemetry = {};
+let pendingChallenge = null; // { seed, opponents, rulesKey }
 
-// Bot-turn pacing: a deliberate think beat, then the play, so each bot
-// turn reads as a moment instead of a blink.
-const THINK_MS = 950;
-const AFTER_MS = 750;
+// Bot-turn pacing. Quick mode shortens the beats.
+let THINK_MS = 950;
+let AFTER_MS = 750;
+
+// All timers are registered so a restart can cancel pending bot turns — no
+// stale callback fires into a fresh round.
+let pendingTimers = [];
+function registerTimer(id) { pendingTimers.push(id); return id; }
+function clearTimers() { pendingTimers.forEach(clearTimeout); pendingTimers = []; }
 
 function loadPersisted() {
   try {
@@ -778,6 +722,10 @@ function loadPersisted() {
     if (savedScores) scores = JSON.parse(savedScores);
     const savedCount = localStorage.getItem('uno.opponents');
     if (savedCount) opponentCount = Math.min(3, Math.max(1, parseInt(savedCount, 10) || 1));
+    const savedRules = localStorage.getItem('uno.rules');
+    if (savedRules && RULES_BY_KEY[savedRules]) currentRulesKey = savedRules;
+    const savedTel = localStorage.getItem('uno.telemetry');
+    if (savedTel) telemetry = JSON.parse(savedTel);
   } catch (e) {
     /* localStorage unavailable — play without persistence */
   }
@@ -788,27 +736,102 @@ function persist() {
     localStorage.setItem('uno.name', playerName);
     localStorage.setItem('uno.scores', JSON.stringify(scores));
     localStorage.setItem('uno.opponents', String(opponentCount));
+    localStorage.setItem('uno.rules', currentRulesKey);
+    localStorage.setItem('uno.telemetry', JSON.stringify(telemetry));
   } catch (e) {
     /* ignore */
+  }
+}
+
+// Accumulate per-bot behaviour so patterns become evidence over time.
+function recordTelemetry(finalState) {
+  for (let i = 1; i < finalState.players.length; i++) {
+    const p = finalState.players[i];
+    const rec = telemetry[p.id] || { games: 0, specials: 0, plays: 0 };
+    rec.games += 1;
+    for (const e of finalState.history) {
+      if (e.type === 'play' && e.player === i) {
+        rec.plays += 1;
+        if (e.card.type !== 'number') rec.specials += 1;
+      }
+    }
+    telemetry[p.id] = rec;
+  }
+}
+
+// ==== SHAREABLE CHALLENGE (seed + config, no backend) ====
+
+function encodeChallenge() {
+  const payload = { s: currentSeed, o: opponentCount, r: currentRulesKey };
+  return btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function decodeChallenge(code) {
+  try {
+    const b64 = code.replace(/-/g, '+').replace(/_/g, '/');
+    const obj = JSON.parse(atob(b64));
+    if (!obj || obj.s == null) return null;
+    const rulesKey = RULES_BY_KEY[obj.r] ? obj.r : 'classic';
+    const opponents = Math.min(3, Math.max(1, parseInt(obj.o, 10) || 1));
+    return { seed: String(obj.s), opponents, rulesKey };
+  } catch (e) {
+    return null;
+  }
+}
+
+function readChallengeFromUrl() {
+  const hash = location.hash || '';
+  const m = hash.match(/c=([^&]+)/);
+  if (!m) return;
+  const parsed = decodeChallenge(decodeURIComponent(m[1]));
+  if (!parsed) return;
+  pendingChallenge = parsed;
+  opponentCount = parsed.opponents;
+  currentRulesKey = parsed.rulesKey;
+}
+
+function shareChallenge() {
+  const url = `${location.origin}${location.pathname}#c=${encodeChallenge()}`;
+  const out = document.getElementById('share-out');
+  // Always show the link (so it's usable even if the clipboard is unavailable),
+  // then upgrade the message if the copy succeeds.
+  out.hidden = false;
+  out.textContent = url;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(
+      () => { out.textContent = '¡Enlace copiado! Misma semilla y reglas: ' + url; },
+      () => {}
+    );
   }
 }
 
 // ==== BOOTSTRAP ====
 
 function newRound() {
-  state = createInitialState({ humanName: playerName, opponents: buildOpponents(opponentCount) });
+  clearTimers();
+  // A shared challenge fixes the seed; otherwise each round gets fresh entropy.
+  const seed = pendingChallenge ? pendingChallenge.seed : String(hashSeed('' + Date.now() + ':' + Math.random()));
+  currentSeed = seed;
+  state = createInitialState({
+    humanName: playerName,
+    opponents: buildOpponents(opponentCount),
+    seed,
+    rules: RULES_BY_KEY[currentRulesKey],
+  });
+  pendingChallenge = null; // consumed; the next round is a fresh game
   scored = false;
   roundPoints = START_POINTS;
-  lastPlaySource = 'human';
   thinkingIndex = null;
   bubbles = {};
   drawnCardId = null;
   gameOverFocused = false;
-  prevDiscardId = topOfDiscard(state).id;
+  lastAnnouncedSeq = 0;
   render(state);
 }
 
 function startGame() {
+  if (quickMode) { THINK_MS = 380; AFTER_MS = 280; opponentCount = pendingChallenge ? opponentCount : 1; }
+  else { THINK_MS = 950; AFTER_MS = 750; }
   renderScore();
   newRound();
   document.getElementById('start-screen').hidden = true;
@@ -820,22 +843,20 @@ function isBotTurn() {
 }
 
 function scheduleCpuIfNeeded() {
-  if (isBotTurn()) setTimeout(beginCpuThinking, AFTER_MS);
+  if (isBotTurn()) registerTimer(setTimeout(beginCpuThinking, AFTER_MS));
 }
 
-// Beat 1: spotlight the bot and show it "thinking".
 function beginCpuThinking() {
   if (!isBotTurn()) return;
   thinkingIndex = state.currentPlayer;
   render(state);
-  setTimeout(resolveCpuTurn, THINK_MS);
+  registerTimer(setTimeout(resolveCpuTurn, THINK_MS));
 }
 
-// Beat 2: the bot actually plays; fly the card in, narrate over its seat.
 function resolveCpuTurn() {
   thinkingIndex = null;
+  if (!isBotTurn()) { render(state); return; }
   const result = runCpuTurn(state);
-  lastPlaySource = 'cpu';
   const actorIndex = result.event.playerIndex;
   state = result.state;
   render(state);
@@ -845,7 +866,7 @@ function resolveCpuTurn() {
   }
   narrateBotAction(result.event, actorIndex);
 
-  if (isBotTurn()) setTimeout(beginCpuThinking, AFTER_MS);
+  if (isBotTurn()) registerTimer(setTimeout(beginCpuThinking, AFTER_MS));
 }
 
 function playLabel(card, state) {
@@ -860,13 +881,15 @@ function playLabel(card, state) {
   }
 }
 
-// Every bot move gets a tooltip OVER that bot's seat (never central), so it's
-// always clear who did what. Specials sometimes carry an in-character quip.
 function narrateBotAction(event, actorIndex) {
   const actor = state.players[actorIndex];
 
   if (event.kind === 'draw-pass') {
     showBubble(actorIndex, 'Robo y paso');
+    return;
+  }
+  if (event.kind === 'absorb') {
+    showBubble(actorIndex, `Robo ${event.count}`);
     return;
   }
 
@@ -878,12 +901,23 @@ function narrateBotAction(event, actorIndex) {
   showBubble(actorIndex, text);
 }
 
-// The human may attempt ANY card. Judging legality is the player's job — an
-// illegal attempt costs points and explains why, but never plays.
+// The human may attempt ANY card. Legality is judged against the engine's own
+// getValidPlays so a person and a bot are held to the exact same rule.
 function handlePlayerAttempt(cardId) {
   if (state.phase !== 'turn' || state.currentPlayer !== 0) return;
   const card = state.players[0].hand.find((c) => c.id === cardId);
   if (!card) return;
+
+  // Facing a stacked penalty: only a matching draw card may be played.
+  if (state.pendingDraw > 0) {
+    if (card.type !== state.pendingDrawType) {
+      const label = state.pendingDrawType === 'draw-two' ? '+2' : '+4';
+      showToast(`Acumulado +${state.pendingDraw}: juega otro ${label} o roba ${state.pendingDraw}.`, 'bad');
+      return;
+    }
+    commitHumanPlay(card, cardId);
+    return;
+  }
 
   // After drawing, only the freshly drawn card may be played.
   if (state.hasDrawn && cardId !== drawnCardId) {
@@ -906,18 +940,19 @@ function handlePlayerAttempt(cardId) {
     return;
   }
 
-  const victimIdx = nextIndexFrom(0, state.direction, state.players.length, 1);
+  commitHumanPlay(card, cardId);
+}
 
-  lastPlaySource = 'human';
+function commitHumanPlay(card, cardId) {
+  const victimIdx = nextIndexFrom(0, state.direction, state.players.length, 1);
   state = playCard(state, 0, cardId);
   render(state);
 
   if (state.phase === 'color-selection') {
-    // Move focus into the modal for keyboard + screen-reader users.
     lastFocused = document.activeElement;
     const firstColor = document.querySelector('#color-picker .color-btn');
     if (firstColor) firstColor.focus();
-    return; // fly + announce after color chosen
+    return; // fly + announce after colour chosen
   }
   flyCardToCenter(topOfDiscard(state), seatElement(0));
   if (card.type !== 'number') {
@@ -928,13 +963,27 @@ function handlePlayerAttempt(cardId) {
 }
 
 function handleDrawClick() {
-  if (state.phase !== 'turn' || state.currentPlayer !== 0 || state.hasDrawn) return;
+  if (state.phase !== 'turn' || state.currentPlayer !== 0) return;
+
+  // Stacking: drawing while a penalty is pending means "give in and absorb".
+  if (state.pendingDraw > 0) {
+    const total = state.pendingDraw;
+    state = absorbPending(state);
+    render(state);
+    showToast(`Robaste ${total} y pierdes el turno.`, 'bad');
+    scheduleCpuIfNeeded();
+    return;
+  }
+
+  if (state.hasDrawn) return;
   state = drawForCurrent(state);
   const hand = state.players[0].hand;
   drawnCardId = hand[hand.length - 1].id;
   render(state);
   showToast('Robaste una carta. Juégala si puedes o pasa el turno.', 'special');
 }
+
+// ==== FOCUS MANAGEMENT ====
 
 function restoreFocus() {
   if (lastFocused && document.body.contains(lastFocused)) {
@@ -946,7 +995,6 @@ function restoreFocus() {
   lastFocused = null;
 }
 
-// Keep Tab focus inside an open modal.
 function trapFocus(overlay) {
   if (!overlay) return;
   overlay.addEventListener('keydown', (e) => {
@@ -965,23 +1013,75 @@ function trapFocus(overlay) {
   });
 }
 
+// ==== HISTORY DIALOG ====
+
+function openHistory() {
+  const dialog = document.getElementById('history-dialog');
+  lastFocused = document.activeElement;
+  renderHistoryList(state);
+  dialog.hidden = false;
+  document.getElementById('history-close').focus();
+}
+
+function closeHistory() {
+  document.getElementById('history-dialog').hidden = true;
+  restoreFocus();
+}
+
+// ==== WIRING ====
+
 loadPersisted();
+readChallengeFromUrl();
 
 const nameInput = document.getElementById('name-input');
 if (playerName && playerName !== 'Jugador') nameInput.value = playerName;
+
+// Challenge banner + preset selection reflect a shared link.
+if (pendingChallenge) {
+  const banner = document.getElementById('challenge-banner');
+  banner.hidden = false;
+  banner.textContent = `Desafío compartido · ${pendingChallenge.opponents} bot(s) · ${RULES_NAME[pendingChallenge.rulesKey]}. Misma semilla para todos.`;
+}
 
 document.querySelectorAll('.opp-option').forEach((btn) => {
   if (parseInt(btn.dataset.count, 10) === opponentCount) btn.classList.add('opp-option--on');
   btn.addEventListener('click', () => {
     opponentCount = parseInt(btn.dataset.count, 10);
+    pendingChallenge = null; // changing config leaves the shared challenge
     document.querySelectorAll('.opp-option').forEach((b) => b.classList.toggle('opp-option--on', b === btn));
   });
 });
+
+function syncRuleButtons() {
+  document.querySelectorAll('.rule-option').forEach((b) => {
+    const on = b.dataset.rule === currentRulesKey;
+    b.classList.toggle('rule-option--on', on);
+    b.setAttribute('aria-checked', String(on));
+  });
+}
+document.querySelectorAll('.rule-option').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    currentRulesKey = btn.dataset.rule;
+    pendingChallenge = null;
+    syncRuleButtons();
+  });
+});
+syncRuleButtons();
 
 document.getElementById('start-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const entered = nameInput.value.trim();
   playerName = entered || 'Jugador';
+  quickMode = false;
+  persist();
+  startGame();
+});
+
+document.getElementById('quick-btn').addEventListener('click', () => {
+  const entered = nameInput.value.trim();
+  playerName = entered || 'Jugador';
+  quickMode = true;
+  currentRulesKey = pendingChallenge ? currentRulesKey : 'classic';
   persist();
   startGame();
 });
@@ -1000,18 +1100,29 @@ document.querySelectorAll('.color-btn').forEach((btn) => {
     if (state.phase !== 'color-selection' || state.pendingPlayer !== 0) return;
     const wildType = state.pendingCard.type;
     const victimIdx = nextIndexFrom(0, state.direction, state.players.length, 1);
-    lastPlaySource = 'human';
     state = chooseColor(state, btn.dataset.color);
     render(state);
     flyCardToCenter(topOfDiscard(state), seatElement(0));
     announcePlay({ type: wildType }, 0, state);
-    if (wildType === 'wild-draw-four') maybeReact(victimIdx, 'hit', 0.85);
+    if (wildType === 'wild-draw-four' && state.rules.stacking === false) maybeReact(victimIdx, 'hit', 0.85);
     restoreFocus();
     scheduleCpuIfNeeded();
   });
 });
 
+document.getElementById('history-btn').addEventListener('click', openHistory);
+document.getElementById('history-close').addEventListener('click', closeHistory);
 document.getElementById('play-again-btn').addEventListener('click', newRound);
+document.getElementById('share-btn').addEventListener('click', shareChallenge);
+
+// Escape closes the history dialog (the colour picker is intentionally not
+// escapable — choosing a colour is mandatory to continue).
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !document.getElementById('history-dialog').hidden) {
+    closeHistory();
+  }
+});
 
 trapFocus(document.getElementById('color-picker'));
 trapFocus(document.getElementById('game-over'));
+trapFocus(document.getElementById('history-dialog'));

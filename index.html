@@ -2,8 +2,12 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>UNO</title>
+  <meta name="description" content="Mesa de cartas tipo UNO contra bots con personalidad. Sin cuenta, sin backend, juega de inmediato. Proyecto de portafolio no afiliado a Mattel.">
+  <meta name="theme-color" content="#14624B">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317171C'/%3E%3Cellipse cx='16' cy='16' rx='13' ry='9' fill='%23E4322B' transform='rotate(-18 16 16)'/%3E%3Ctext x='16' y='21' font-family='Arial,sans-serif' font-size='11' font-weight='bold' fill='%23fff' text-anchor='middle'%3EUNO%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&display=swap" rel="stylesheet">
@@ -12,6 +16,9 @@
 <body>
   <div id="app">
 
+    <!-- Screen-reader live region for state changes (visually hidden). -->
+    <div id="sr-live" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+
     <!-- ============ START SCREEN ============ -->
     <section id="start-screen" class="screen">
       <div class="start">
@@ -19,19 +26,45 @@
           <span class="logo__word">UNO</span>
         </div>
         <p class="start__tag">El clásico de cartas. Tú contra los bots.</p>
+
+        <div id="challenge-banner" class="challenge-banner" hidden></div>
+
         <form id="start-form" class="start__form" novalidate>
           <label class="start__label" for="name-input">¿Cómo te llamas?</label>
           <input id="name-input" class="start__input" type="text" maxlength="16"
                  placeholder="Tu nombre" autocomplete="off" required>
 
-          <span class="start__label">¿Contra cuántos bots?</span>
-          <div class="opp-select" role="group" aria-label="Cantidad de bots">
-            <button type="button" class="opp-option" data-count="1">1</button>
-            <button type="button" class="opp-option" data-count="2">2</button>
-            <button type="button" class="opp-option" data-count="3">3</button>
-          </div>
+          <fieldset class="field-group">
+            <legend class="start__label">¿Contra cuántos bots?</legend>
+            <div class="opp-select" role="group" aria-label="Cantidad de bots">
+              <button type="button" class="opp-option" data-count="1">1</button>
+              <button type="button" class="opp-option" data-count="2">2</button>
+              <button type="button" class="opp-option" data-count="3">3</button>
+            </div>
+          </fieldset>
 
-          <button type="submit" class="btn btn--primary">Jugar</button>
+          <fieldset class="field-group">
+            <legend class="start__label">Reglas</legend>
+            <div class="rules-select" role="radiogroup" aria-label="Modo de reglas">
+              <button type="button" class="rule-option" role="radio" data-rule="classic" aria-checked="true">
+                <span class="rule-option__name">Clásico</span>
+                <span class="rule-option__desc">Reglas estándar de UNO.</span>
+              </button>
+              <button type="button" class="rule-option" role="radio" data-rule="drawToMatch" aria-checked="false">
+                <span class="rule-option__name">Robar hasta jugar</span>
+                <span class="rule-option__desc">Si no puedes jugar, robas hasta conseguir una carta válida. Partidas más largas.</span>
+              </button>
+              <button type="button" class="rule-option" role="radio" data-rule="stacking" aria-checked="false">
+                <span class="rule-option__name">Acumular +2 / +4</span>
+                <span class="rule-option__desc">Responde a un +2 con otro +2 (o +4 con +4) y suma la penalización al siguiente. Sube la tensión.</span>
+              </button>
+            </div>
+          </fieldset>
+
+          <div class="start__actions">
+            <button type="submit" class="btn btn--primary">Jugar</button>
+            <button type="button" id="quick-btn" class="btn btn--ghost">Partida rápida</button>
+          </div>
         </form>
       </div>
     </section>
@@ -40,13 +73,16 @@
     <section id="game-screen" class="screen" hidden>
       <header class="topbar">
         <div class="brand"><span class="brand__mark">UNO</span></div>
-        <div class="score" aria-label="Marcador">
-          <span class="score__side">
-            <span class="score__name" id="score-player-name">Tú</span>
-            <b id="score-player">0</b>
-          </span>
-          <span class="score__dash">—</span>
-          <span class="score__side"><b id="score-cpu">0</b> Bots</span>
+        <div class="topbar__right">
+          <div class="score" aria-label="Marcador">
+            <span class="score__side">
+              <span class="score__name" id="score-player-name">Tú</span>
+              <b id="score-player">0</b>
+            </span>
+            <span class="score__dash">—</span>
+            <span class="score__side"><b id="score-cpu">0</b> Bots</span>
+          </div>
+          <button id="history-btn" class="icon-btn" type="button" aria-haspopup="dialog">Historial</button>
         </div>
       </header>
 
@@ -54,7 +90,7 @@
         <section class="table" id="center-area">
           <button id="draw-pile" class="pile pile--draw" type="button" aria-label="Robar una carta">
             <div class="card card--back"><span class="card__logo">UNO</span></div>
-            <span class="pile__caption">Robar</span>
+            <span class="pile__caption" id="draw-caption">Robar</span>
           </button>
 
           <div id="discard-pile" class="pile pile--discard" aria-label="Descarte"></div>
@@ -93,16 +129,37 @@
       </div>
     </div>
 
+    <!-- ============ HISTORY ============ -->
+    <div id="history-dialog" class="overlay" role="dialog" aria-modal="true" aria-labelledby="history-title" hidden>
+      <div class="overlay__panel overlay__panel--log">
+        <div class="overlay__head">
+          <p class="overlay__title" id="history-title">Historial de la partida</p>
+          <button id="history-close" class="icon-btn" type="button" aria-label="Cerrar historial">Cerrar</button>
+        </div>
+        <ol id="history-list" class="history-list"></ol>
+      </div>
+    </div>
+
     <!-- ============ GAME OVER ============ -->
     <div id="game-over" class="overlay" role="dialog" aria-modal="true" aria-labelledby="game-over-message" hidden>
       <div class="overlay__panel">
         <p id="game-over-message" class="overlay__title"></p>
         <p id="game-over-score" class="overlay__sub"></p>
-        <button id="play-again-btn" class="btn btn--primary" type="button">Jugar de nuevo</button>
+
+        <div class="summary" aria-label="Resumen de la partida">
+          <p class="summary__head">Tres momentos</p>
+          <ul id="game-over-summary" class="summary__list"></ul>
+        </div>
+
+        <div class="game-over__actions">
+          <button id="play-again-btn" class="btn btn--primary" type="button">Jugar de nuevo</button>
+          <button id="share-btn" class="btn btn--ghost" type="button">Compartir desafío</button>
+        </div>
+        <p id="share-out" class="share-out" hidden></p>
       </div>
     </div>
 
   </div>
-  <script src="game.js"></script>
+  <script type="module" src="game.js"></script>
 </body>
 </html>

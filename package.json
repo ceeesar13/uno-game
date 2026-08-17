@@ -1,0 +1,11 @@
+{
+  "name": "uno-mesa",
+  "version": "1.0.0",
+  "description": "A one-player UNO table that feels social — vanilla HTML/CSS/JS, no build, no backend.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "serve": "python serve.py"
+  }
+}
