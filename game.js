@@ -116,8 +116,15 @@ function buildCardElement(card, { faceUp }) {
 function applyFanTransform(el, index, count, spread, drop) {
   const mid = (count - 1) / 2;
   const offset = index - mid;
-  el.style.setProperty('--rot', (offset * spread).toFixed(2) + 'deg');
-  el.style.setProperty('--ty', (Math.abs(offset) * drop).toFixed(1) + 'px');
+  // Cap the edge tilt/drop so big hands stay flat-ish: uncapped, a 15+ card
+  // fan tilts its edge cards ~21deg and sinks them ~25px, clipping them
+  // against the viewport bottom (or the scroll strip) on phones.
+  const MAX_EDGE_TILT = 14; // deg, outermost card
+  const MAX_EDGE_DROP = 10; // px, outermost card
+  const tilt = mid > 0 ? Math.min(spread, MAX_EDGE_TILT / mid) : spread;
+  const sink = mid > 0 ? Math.min(drop, MAX_EDGE_DROP / mid) : drop;
+  el.style.setProperty('--rot', (offset * tilt).toFixed(2) + 'deg');
+  el.style.setProperty('--ty', (Math.abs(offset) * sink).toFixed(1) + 'px');
 }
 
 // Seat placement around the table by opponent count.

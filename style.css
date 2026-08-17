@@ -43,7 +43,11 @@ body {
   min-height: 100dvh; /* account for dynamic browser bars on mobile */
 }
 
-#app { min-height: 100vh; min-height: 100dvh; }
+/* overflow-x: clip absorbs transient horizontal spill (speech bubbles at edge
+   seats, the active-player scale-up) without creating a scroll container, so
+   the page never gains a sideways "margin". Fixed-position layers (toast,
+   flying cards) are unaffected. */
+#app { min-height: 100vh; min-height: 100dvh; overflow-x: clip; }
 
 .sr-only {
   position: absolute;
@@ -177,12 +181,21 @@ body {
 /* ============================================================
    GAME SCREEN
    ============================================================ */
-#game-screen { padding: 0.75rem clamp(0.5rem, 3vw, 2rem) 1.25rem; gap: 0.5rem; }
+/* Side/bottom padding respects notch safe areas (viewport-fit=cover). */
+#game-screen {
+  padding: 0.75rem
+    max(clamp(0.5rem, 3vw, 2rem), env(safe-area-inset-right))
+    max(1rem, env(safe-area-inset-bottom))
+    max(clamp(0.5rem, 3vw, 2rem), env(safe-area-inset-left));
+  gap: 0.5rem;
+}
 
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap; /* narrow screens: buttons drop to a second row, never overflow */
+  row-gap: 0.3rem;
   padding: 0.35rem 0.25rem 0.6rem;
   border-bottom: 1px solid rgba(255,255,255,0.1);
 }
@@ -260,14 +273,17 @@ body {
 /* Full-width so the hand box tracks the viewport instead of shrink-wrapping to
    its cards — that keeps fitHand's width measurement honest and lets the scroll
    fallback actually scroll rather than push the page wider. */
-.fan--player { --overlap: -0.42; padding-top: 32px; width: 100%; max-width: 100%; }
+.fan--player { --overlap: -0.42; padding-top: 32px; padding-bottom: 12px; width: 100%; max-width: 100%; }
 .fan--player .card:not(:first-child) { margin-left: calc(var(--card-w) * var(--overlap)); }
 .fan--scroll {
   justify-content: flex-start;
   overflow-x: auto;
   overflow-y: hidden;
+  /* extra vertical padding: this box clips (overflow-y hidden), so fanned
+     tilt/drop and the focus ring must fit inside it */
   padding-left: 10px;
   padding-right: 10px;
+  padding-bottom: 16px;
   scrollbar-width: thin;
   scroll-snap-type: x proximity;
 }
@@ -620,58 +636,6 @@ body {
 .toast--bad { border-color: var(--uno-red); }
 .toast--special { border-color: var(--gold); }
 
-/* ============================================================
-   RESPONSIVE
-   ============================================================ */
-@media (max-width: 620px) {
-  :root { --card-w: 60px; --card-h: 90px; --radius: 11px; }
-  .card__value { font-size: 1.9rem; }
-  .logo { width: 210px; height: 124px; }
-  .logo__word { font-size: 4rem; }
-  .brand__mark { font-size: 1.2rem; }
-  .score { font-size: 0.95rem; }
-  /* Compact the three bot seats so they fit their narrow columns. Seats fill
-     their track (instead of sizing to the fan) and clip, so they never collide. */
-  .arena { gap: 0.25rem; }
-  .seat--tl, .seat--t, .seat--tr { justify-self: stretch; }
-  .cpu-player { padding: 0.25rem 0.3rem; align-items: center; max-width: 100%; }
-  /* Clip only the fan (face-down cards), never the seat — speech bubbles live
-     outside the seat box and must stay visible. */
-  .cpu-player .fan--cpu { max-width: 100%; overflow: hidden; }
-  .cpu-player .card { width: calc(var(--card-w) * 0.5); height: calc(var(--card-h) * 0.5); }
-  .cpu-player .fan--cpu { min-height: calc(var(--card-h) * 0.5 + 6px); overflow: hidden; }
-  .cpu-player .fan--cpu .card:not(:first-child) { margin-left: calc(var(--card-w) * -0.34); }
-  /* Stack each bot head vertically so three fit their narrow columns without
-     colliding: avatar on top, name (truncated) and count below. */
-  .cpu-player__head { flex-direction: column; gap: 0.1rem; font-size: 0.72rem; text-align: center; }
-  .cpu-player__name { max-width: 5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .style-tag { font-size: 0.55rem; }
-}
-
-@media (max-width: 400px) {
-  .bot-tag { display: none; } /* avatar + style label already signal "bot" */
-  .cpu-player__name { max-width: 4.2rem; }
-}
-
-@media (max-width: 400px) {
-  :root { --card-w: 52px; --card-h: 78px; }
-  .card__value { font-size: 1.6rem; }
-  .fan--cpu .card:not(:first-child) { margin-left: calc(var(--card-w) * -0.42); }
-}
-
-/* Landscape, low height: compress the vertical rhythm so the table, the top
-   card, the active colour and the main action all stay on screen. */
-@media (orientation: landscape) and (max-height: 480px) {
-  :root { --card-w: 50px; --card-h: 75px; }
-  #game-screen { padding-top: 0.3rem; }
-  .topbar { padding-bottom: 0.3rem; }
-  .fan { padding: 18px 0 2px; min-height: calc(var(--card-h) + 20px); }
-  .fan--player { padding-top: 22px; }
-  .arena { gap: 0.25rem; }
-  .status { min-width: 120px; }
-  .cpu-player .card { width: calc(var(--card-w) * 0.55); height: calc(var(--card-h) * 0.55); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
@@ -861,7 +825,15 @@ body {
 .challenge-banner[hidden] { display: none; }
 
 /* Topbar: history button + right cluster */
-.topbar__right { display: flex; align-items: center; gap: 0.75rem; }
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 0.3rem;
+  min-width: 0;
+}
 .icon-btn {
   font-family: var(--font-display);
   font-weight: 700;
@@ -1016,4 +988,124 @@ body {
 @media (max-height: 520px) {
   .overlay__panel { max-height: 92vh; overflow-y: auto; padding: 1.2rem 1.4rem; }
   .summary { padding: 0.6rem 0.8rem; }
+}
+
+/* ============================================================
+   RESPONSIVE — kept at the END of the stylesheet on purpose: these
+   overrides share specificity with the component base rules above,
+   so source order is what makes them win on small screens.
+   ============================================================ */
+@media (max-width: 620px) {
+  :root { --card-w: 60px; --card-h: 90px; --radius: 11px; }
+  .card__value { font-size: 1.9rem; }
+  .logo { width: 210px; height: 124px; }
+  .logo__word { font-size: 4rem; }
+
+  /* Topbar: compact pills + smaller score so everything fits; past that the
+     flex-wrap on .topbar/.topbar__right drops the buttons to a second row. */
+  .brand__mark { font-size: 1.2rem; }
+  .score { font-size: 0.9rem; }
+  .score__side b { font-size: 1.05rem; }
+  .topbar__right { gap: 0.4rem; }
+  .icon-btn { font-size: 0.7rem; padding: 0.28rem 0.6rem; }
+
+  /* Compact the three bot seats so they fit their narrow columns. Seats fill
+     their track (instead of sizing to the fan) and clip, so they never collide. */
+  .arena { gap: 0.25rem; }
+  .seat--tl, .seat--t, .seat--tr { justify-self: stretch; }
+  .cpu-player { padding: 0.2rem 0.3rem; align-items: center; max-width: 100%; gap: 0.15rem; }
+  /* Clip only the fan (face-down cards), never the seat — speech bubbles live
+     outside the seat box and must stay visible. */
+  .cpu-player .fan--cpu { max-width: 100%; overflow: hidden; }
+  .cpu-player .card { width: calc(var(--card-w) * 0.5); height: calc(var(--card-h) * 0.5); }
+  .cpu-player .fan--cpu { min-height: calc(var(--card-h) * 0.5 + 6px); padding: 4px 0 0; overflow: hidden; }
+  .cpu-player .fan--cpu .card:not(:first-child) { margin-left: calc(var(--card-w) * -0.34); }
+  /* Keep each bot head on one compact wrapping row — stacking the avatar,
+     name and count vertically made every seat ~170px tall and pushed the
+     player hand below the fold on short phones. */
+  .cpu-player__head { flex-wrap: wrap; justify-content: center; gap: 0.15rem 0.25rem; font-size: 0.72rem; text-align: center; }
+  .avatar { width: 18px; height: 18px; font-size: 0.6rem; }
+  .count-badge { font-size: 0.7rem; padding: 0.02rem 0.4rem; min-width: 1.2rem; }
+  .cpu-player__name { max-width: 4.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .style-tag { font-size: 0.55rem; }
+  .uno-warn { font-size: 0.55rem; }
+  /* Softer spotlight scale: 1.12 spills outside the edge columns on phones. */
+  .cpu-player--active { transform: scale(1.05) !important; }
+
+  /* Speech bubbles at the edge seats pin to the seat edge instead of
+     centering, so they never poke past the viewport. */
+  .speech-bubble { max-width: min(170px, 46vw); }
+  .seat--tl .speech-bubble { left: 0; transform: none; animation: fade-in 0.2s ease; }
+  .seat--tl .speech-bubble::after { left: 20%; }
+  .seat--tr .speech-bubble { left: auto; right: 0; transform: none; animation: fade-in 0.2s ease; }
+  .seat--tr .speech-bubble::after { left: auto; right: 20%; transform: none; }
+
+  /* Center table: tighter rhythm so piles + status share the vertical budget. */
+  .table { gap: clamp(0.6rem, 4vw, 2rem); padding: 0.25rem 0; }
+  .status { min-width: 0; gap: 0.35rem; }
+  .banner { font-size: 0.92rem; padding: 0.35rem 0.85rem; }
+  .pile__caption { font-size: 0.68rem; }
+
+  /* Player zone: shave label + fan padding (hover raise is 24px, fits in 26). */
+  .zone { gap: 0.25rem; }
+  .zone__label { font-size: 0.85rem; }
+  .fan--player { padding-top: 26px; }
+}
+
+@media (max-width: 400px) {
+  .bot-tag { display: none; } /* avatar + style label already signal "bot" */
+  .cpu-player__name { max-width: 4.2rem; }
+}
+
+@media (max-width: 400px) {
+  :root { --card-w: 52px; --card-h: 78px; }
+  .card__value { font-size: 1.6rem; }
+  .fan--cpu .card:not(:first-child) { margin-left: calc(var(--card-w) * -0.42); }
+  /* Squeeze the topbar so score + three buttons share one wrapped row
+     (brand above) instead of spilling onto a third line. Long player names
+     still wrap gracefully thanks to flex-wrap. */
+  .score { font-size: 0.78rem; gap: 0.3rem; }
+  .score__side b { font-size: 0.95rem; }
+  .topbar__right { gap: 0.25rem; }
+  /* Vertical padding keeps the tap target ~24px even with the smaller label */
+  .icon-btn { font-size: 0.6rem; padding: 0.32rem 0.45rem; letter-spacing: 0.01em; }
+}
+
+/* Landscape, low height: compress the vertical rhythm so the table, the top
+   card, the active colour and the main action all stay on screen. */
+@media (orientation: landscape) and (max-height: 480px) {
+  :root { --card-w: 46px; --card-h: 69px; }
+  #game-screen {
+    padding-top: 0.2rem;
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    gap: 0.25rem;
+  }
+  .topbar { padding: 0.15rem 0.25rem 0.3rem; }
+  .brand__mark { font-size: 1.05rem; }
+  .score { font-size: 0.85rem; }
+  .score__side b { font-size: 1rem; }
+  .topbar__right { gap: 0.4rem; }
+  .icon-btn { font-size: 0.68rem; padding: 0.22rem 0.55rem; }
+
+  .arena { gap: 0.2rem; }
+  .cpu-player { padding: 0.15rem 0.35rem; gap: 0.1rem; }
+  .cpu-player__head { font-size: 0.78rem; gap: 0.3rem; }
+  .avatar { width: 20px; height: 20px; font-size: 0.65rem; }
+  .style-tag { font-size: 0.5rem; }
+  .cpu-player .card { width: calc(var(--card-w) * 0.45); height: calc(var(--card-h) * 0.45); }
+  .cpu-player .fan--cpu { min-height: calc(var(--card-h) * 0.45 + 4px); padding: 2px 0 0; }
+
+  .table { padding: 0; gap: clamp(0.8rem, 3vw, 2rem); }
+  /* Status lays out horizontally: stacking banner + timer + color chip
+     vertically is what blew the height budget on short screens. */
+  .status { min-width: 0; flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; gap: 0.3rem 0.5rem; }
+  .banner { font-size: 0.9rem; padding: 0.3rem 0.8rem; }
+  .chip { font-size: 0.8rem; }
+  .pile__caption { font-size: 0.62rem; }
+
+  .zone { gap: 0.2rem; }
+  .zone__label { font-size: 0.8rem; }
+  .fan { padding: 18px 0 2px; min-height: calc(var(--card-h) + 16px); }
+  .fan--player { padding-top: 20px; padding-bottom: 6px; }
+  .fan--scroll { padding-bottom: 12px; }
 }
