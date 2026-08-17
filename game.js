@@ -105,9 +105,45 @@ function checkWinner(state) {
   return null;
 }
 
+function drawCards(state, count) {
+  let { deck, discardPile } = state;
+  const drawn = [];
+
+  for (let i = 0; i < count; i++) {
+    if (deck.length === 0) {
+      const top = discardPile[discardPile.length - 1];
+      const rest = discardPile.slice(0, -1);
+      deck = shuffleDeck(rest);
+      discardPile = [top];
+    }
+    if (deck.length === 0) break;
+    drawn.push(deck[deck.length - 1]);
+    deck = deck.slice(0, -1);
+  }
+
+  return { drawn, deck, discardPile };
+}
+
 function applyEffect(state, card, playerKey) {
   const opponentKey = playerKey === 'player' ? 'cpu' : 'player';
-  return nextTurnState(state, opponentKey);
+  const opponentHandKey = opponentKey === 'player' ? 'playerHand' : 'cpuHand';
+
+  switch (card.type) {
+    case 'skip':
+    case 'reverse':
+      return nextTurnState(state, playerKey);
+
+    case 'draw-two': {
+      const { drawn, deck, discardPile } = drawCards(state, 2);
+      return nextTurnState(
+        { ...state, deck, discardPile, [opponentHandKey]: [...state[opponentHandKey], ...drawn] },
+        playerKey
+      );
+    }
+
+    default:
+      return nextTurnState(state, opponentKey);
+  }
 }
 
 function finalizePlay(state, card, playerKey) {
