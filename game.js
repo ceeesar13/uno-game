@@ -249,6 +249,9 @@ function playCpuCard(state, card) {
   return next;
 }
 
+// Returns { state, event } so the app layer can animate and announce what
+// the CPU did. event.kind: 'play' (card played, optional drew flag) or
+// 'draw-pass' (drew and could not play). No DOM access — stays pure.
 function runCpuTurn(state) {
   const move = getCpuMove(state);
 
@@ -256,12 +259,13 @@ function runCpuTurn(state) {
     const drawn = drawForCpu(state);
     const stillValid = getValidPlays(drawn.cpuHand, drawn.currentColor, topOfDiscard(drawn));
     if (stillValid.length === 0) {
-      return nextTurnState(drawn, 'player');
+      return { state: nextTurnState(drawn, 'player'), event: { kind: 'draw-pass' } };
     }
-    return playCpuCard(drawn, stillValid[0]);
+    const card = stillValid[0];
+    return { state: playCpuCard(drawn, card), event: { kind: 'play', card, drew: true } };
   }
 
-  return playCpuCard(state, move.card);
+  return { state: playCpuCard(state, move.card), event: { kind: 'play', card: move.card } };
 }
 
 // ==== RENDER ====
@@ -283,7 +287,7 @@ function cardGlyph(card) {
   return CARD_SYMBOLS[card.type] || '';
 }
 
-function buildCardElement(card, { faceUp, playable, muted }) {
+function buildCardElement(card, { faceUp }) {
   const el = document.createElement('div');
   el.className = 'card';
 
@@ -320,52 +324,51 @@ function buildCardElement(card, { faceUp, playable, muted }) {
     el.appendChild(br);
   }
 
-  if (playable) el.classList.add('card--playable');
-  if (muted) el.classList.add('card--muted');
   return el;
 }
 
-function mustDrawNow(state) {
-  return (
-    state.phase === 'player-turn' &&
-    !state.hasDrawn &&
-    getValidPlays(state.playerHand, state.currentColor, topOfDiscard(state)).length === 0
-  );
+// A gentle hand fan: rotate + drop each card by its distance from center,
+// so the hand reads as a real fan instead of a rigid grid.
+function applyFanTransform(el, index, count, spread, drop) {
+  const mid = (count - 1) / 2;
+  const offset = index - mid;
+  el.style.setProperty('--rot', (offset * spread).toFixed(2) + 'deg');
+  el.style.setProperty('--ty', (Math.abs(offset) * drop).toFixed(1) + 'px');
 }
 
 function renderHands(state) {
-  const top = topOfDiscard(state);
   const interactive = state.phase === 'player-turn';
-  const validIds = interactive
-    ? new Set(getValidPlays(state.playerHand, state.currentColor, top).map((c) => c.id))
-    : new Set();
 
   const playerHandEl = document.getElementById('player-hand');
   playerHandEl.innerHTML = '';
-  for (const card of state.playerHand) {
-    const playable = interactive && validIds.has(card.id);
-    const muted = interactive && !playable;
-    const el = buildCardElement(card, { faceUp: true, playable, muted });
-    if (playable) el.addEventListener('click', () => handlePlayerPlay(card.id));
+  const n = state.playerHand.length;
+  state.playerHand.forEach((card, i) => {
+    const el = buildCardElement(card, { faceUp: true });
+    applyFanTransform(el, i, n, 3, 3.5);
+    el.addEventListener('click', () => handlePlayerAttempt(card.id));
     playerHandEl.appendChild(el);
-  }
+  });
+  playerHandEl.style.pointerEvents = interactive ? 'auto' : 'none';
 
   document.getElementById('cpu-count').textContent = state.cpuHand.length;
   const cpuHandEl = document.getElementById('cpu-hand');
   cpuHandEl.innerHTML = '';
-  for (let i = 0; i < state.cpuHand.length; i++) {
-    cpuHandEl.appendChild(buildCardElement(null, { faceUp: false }));
+  const m = state.cpuHand.length;
+  for (let i = 0; i < m; i++) {
+    const el = buildCardElement(null, { faceUp: false });
+    applyFanTransform(el, i, m, 2, 2);
+    cpuHandEl.appendChild(el);
   }
 }
 
 function renderPiles(state) {
-  document.getElementById('draw-pile').classList.toggle('is-required', mustDrawNow(state));
-
   const discardEl = document.getElementById('discard-pile');
   const top = topOfDiscard(state);
   discardEl.innerHTML = '';
-  const el = buildCardElement(top, { faceUp: true, playable: false });
-  if (top.id !== prevDiscardId) el.classList.add('card--pop');
+  const el = buildCardElement(top, { faceUp: true });
+  if (top.id !== prevDiscardId) {
+    el.classList.add(lastPlaySource === 'cpu' ? 'card--fly-cpu' : 'card--fly-player');
+  }
   discardEl.appendChild(el);
   prevDiscardId = top.id;
 }
@@ -376,9 +379,7 @@ function renderBanner(state) {
 
   if (state.phase === 'player-turn') {
     banner.classList.add('banner--you');
-    banner.textContent = mustDrawNow(state)
-      ? 'No tienes jugada. Toma una carta.'
-      : `Te toca, ${playerName}`;
+    banner.textContent = `Te toca, ${playerName}`;
   } else if (state.phase === 'cpu-turn') {
     banner.classList.add('banner--cpu');
     banner.innerHTML = 'Juega la CPU<span class="banner__dots"></span>';
@@ -416,6 +417,10 @@ function renderPassButton(state) {
   document.getElementById('pass-btn').hidden = !(state.phase === 'player-turn' && state.hasDrawn);
 }
 
+function renderPoints() {
+  document.getElementById('points').textContent = roundPoints;
+}
+
 function renderScore() {
   document.getElementById('score-player-name').textContent = playerName;
   document.getElementById('score-player').textContent = scores.player;
@@ -438,7 +443,7 @@ function renderGameOver(state) {
   document.getElementById('game-over-message').textContent =
     state.winner === 'player' ? `¡Ganaste, ${playerName}!` : 'Ganó la CPU';
   document.getElementById('game-over-score').textContent =
-    `${playerName} ${scores.player} — ${scores.cpu} CPU`;
+    `${playerName} ${scores.player} — ${scores.cpu} CPU · ${roundPoints} pts`;
 }
 
 function render(state) {
@@ -448,16 +453,71 @@ function render(state) {
   renderColorChip(state);
   renderColorPicker(state);
   renderPassButton(state);
+  renderPoints();
   renderGameOver(state);
 }
 
+// ==== TOASTS (feedback for plays and penalties) ====
+
+let toastTimer = null;
+
+function showToast(message, kind) {
+  const toast = document.getElementById('toast');
+  toast.hidden = false;
+  toast.textContent = message;
+  toast.className = 'toast toast--show' + (kind ? ' toast--' + kind : '');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.className = 'toast' + (kind ? ' toast--' + kind : '');
+  }, 1900);
+}
+
+// Announce a special/superpower card so a turn-steal is never missed.
+// `state` is the state AFTER the play resolved. Number cards stay silent.
+function announcePlay(card, actor, state) {
+  const byPlayer = actor === 'player';
+  switch (card.type) {
+    case 'draw-two':
+      showToast(byPlayer ? 'Juegas +2 — la CPU roba 2 cartas' : 'La CPU juega +2 — robas 2 cartas', 'special');
+      break;
+    case 'wild-draw-four':
+      showToast(
+        byPlayer
+          ? `Juegas +4 — la CPU roba 4 y pierde el turno (color: ${COLOR_NAMES[state.currentColor]})`
+          : `La CPU juega +4 — robas 4 y pierdes el turno (color: ${COLOR_NAMES[state.currentColor]})`,
+        'special'
+      );
+      break;
+    case 'skip':
+      showToast(byPlayer ? 'Salto — la CPU pierde el turno' : 'La CPU te salta — pierdes el turno', 'special');
+      break;
+    case 'reverse':
+      showToast(byPlayer ? 'Reversa — la CPU pierde el turno' : 'La CPU juega Reversa — pierdes el turno', 'special');
+      break;
+    case 'wild':
+      showToast(`Color cambiado a ${COLOR_NAMES[state.currentColor]}`, 'special');
+      break;
+    default:
+      break;
+  }
+}
+
+function invalidReason(state) {
+  return `No puedes jugar esa carta: el color activo es ${COLOR_NAMES[state.currentColor]} y no coincide en número ni símbolo.`;
+}
+
 // ==== APP STATE + PERSISTENCE ====
+
+const START_POINTS = 100;
+const PENALTY = 10;
 
 let state = null;
 let playerName = 'Jugador';
 let scores = { player: 0, cpu: 0 };
 let scored = false;
 let prevDiscardId = null;
+let roundPoints = START_POINTS;
+let lastPlaySource = 'player';
 
 function loadPersisted() {
   try {
@@ -481,38 +541,73 @@ function persist() {
 
 // ==== BOOTSTRAP ====
 
-function startGame() {
+function newRound() {
   state = createInitialState();
   scored = false;
-  prevDiscardId = null;
-  renderScore();
+  roundPoints = START_POINTS;
+  lastPlaySource = 'player';
+  prevDiscardId = topOfDiscard(state).id; // skip fly-in on the opening card
   render(state);
+}
+
+function startGame() {
+  renderScore();
+  newRound();
   document.getElementById('start-screen').hidden = true;
   document.getElementById('game-screen').hidden = false;
 }
 
-function runCpuTurnAndRender() {
-  state = runCpuTurn(state);
-  render(state);
-  if (state.phase === 'cpu-turn' && state.winner === null) {
-    setTimeout(runCpuTurnAndRender, 700);
+function scheduleCpuIfNeeded() {
+  if (state.phase === 'cpu-turn') {
+    setTimeout(runCpuTurnAndRender, 1000);
   }
 }
 
-function handlePlayerPlay(cardId) {
+function runCpuTurnAndRender() {
+  const result = runCpuTurn(state);
+  lastPlaySource = 'cpu';
+  state = result.state;
+  render(state);
+
+  if (result.event.kind === 'play' && result.event.card) {
+    announcePlay(result.event.card, 'cpu', state);
+  } else if (result.event.kind === 'draw-pass') {
+    showToast('La CPU roba y pasa', 'special');
+  }
+
+  if (state.phase === 'cpu-turn' && state.winner === null) {
+    setTimeout(runCpuTurnAndRender, 1000);
+  }
+}
+
+// The player may attempt ANY card. Judging what is legal is the player's
+// job — an illegal attempt costs points and explains why, but never plays.
+function handlePlayerAttempt(cardId) {
+  if (state.phase !== 'player-turn') return;
+  const card = state.playerHand.find((c) => c.id === cardId);
+  if (!card) return;
+
+  if (!isValidPlay(card, state.currentColor, topOfDiscard(state))) {
+    roundPoints = Math.max(0, roundPoints - PENALTY);
+    renderPoints();
+    showToast(`${invalidReason(state)} −${PENALTY} pts`, 'bad');
+    return;
+  }
+
+  lastPlaySource = 'player';
   state = playCard(state, 'player', cardId);
   render(state);
-  if (state.phase === 'cpu-turn') {
-    setTimeout(runCpuTurnAndRender, 700);
-  }
+
+  if (state.phase === 'color-selection') return; // announce after color chosen
+  if (card.type !== 'number') announcePlay(card, 'player', state);
+  scheduleCpuIfNeeded();
 }
 
 function handleDrawClick() {
   if (state.phase !== 'player-turn' || state.hasDrawn) return;
-  const validPlays = getValidPlays(state.playerHand, state.currentColor, topOfDiscard(state));
-  if (validPlays.length > 0) return;
   state = drawForPlayer(state);
   render(state);
+  showToast('Robaste una carta. Juégala si puedes o pasa el turno.', 'special');
 }
 
 loadPersisted();
@@ -534,23 +629,19 @@ document.getElementById('pass-btn').addEventListener('click', () => {
   if (state.phase !== 'player-turn' || !state.hasDrawn) return;
   state = passTurn(state);
   render(state);
-  setTimeout(runCpuTurnAndRender, 700);
+  scheduleCpuIfNeeded();
 });
 
 document.querySelectorAll('.color-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
     if (state.phase !== 'color-selection' || state.pendingPlayer !== 'player') return;
+    const wildType = state.pendingCard.type;
+    lastPlaySource = 'player';
     state = chooseColor(state, btn.dataset.color);
     render(state);
-    if (state.phase === 'cpu-turn') {
-      setTimeout(runCpuTurnAndRender, 700);
-    }
+    announcePlay({ type: wildType }, 'player', state);
+    scheduleCpuIfNeeded();
   });
 });
 
-document.getElementById('play-again-btn').addEventListener('click', () => {
-  state = createInitialState();
-  scored = false;
-  prevDiscardId = null;
-  render(state);
-});
+document.getElementById('play-again-btn').addEventListener('click', newRound);

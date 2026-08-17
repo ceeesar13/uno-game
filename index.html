@@ -48,8 +48,9 @@
       </section>
 
       <section class="table">
-        <button id="draw-pile" class="pile pile--draw" type="button" aria-label="Tomar carta">
+        <button id="draw-pile" class="pile pile--draw" type="button" aria-label="Robar una carta">
           <div class="card card--back"><span class="card__logo">UNO</span></div>
+          <span class="pile__caption">Robar</span>
         </button>
 
         <div id="discard-pile" class="pile pile--discard" aria-label="Descarte"></div>
@@ -59,14 +60,19 @@
           <div id="color-chip" class="chip" hidden>
             <span class="chip__dot"></span><span id="color-chip-name" class="chip__name"></span>
           </div>
-          <button id="pass-btn" class="btn btn--ghost" type="button" hidden>Pasar</button>
+          <button id="pass-btn" class="btn btn--ghost" type="button" hidden>Pasar turno</button>
         </div>
       </section>
 
       <section class="zone zone--player" id="player-zone">
-        <div class="zone__label" id="player-label">Tú</div>
+        <div class="zone__label">
+          <span id="player-label">Tú</span>
+          <span class="points" aria-label="Puntos"><b id="points">100</b> pts</span>
+        </div>
         <div id="player-hand" class="fan fan--player"></div>
       </section>
+
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     </section>
 
     <!-- ============ COLOR PICKER ============ -->
