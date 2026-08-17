@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UNO</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="game">
+    <section class="cpu-area">
+      <div class="hand-label">CPU (<span id="cpu-count">0</span> cartas)</div>
+      <div id="cpu-hand" class="hand hand--cpu"></div>
+    </section>
+
+    <section class="table">
+      <div id="draw-pile" class="pile pile--draw">
+        <div class="card card--back"></div>
+      </div>
+      <div id="discard-pile" class="pile pile--discard"></div>
+      <div id="turn-indicator" class="turn-indicator"></div>
+    </section>
+
+    <section class="player-area">
+      <div class="hand-label">Tu mano</div>
+      <div id="player-hand" class="hand hand--player"></div>
+      <button id="pass-btn" class="btn" hidden>Pasar turno</button>
+    </section>
+
+    <div id="color-picker" class="overlay" hidden>
+      <div class="overlay__panel">
+        <p>Elegí un color</p>
+        <div>
+          <button class="color-btn color-btn--red" data-color="red"></button>
+          <button class="color-btn color-btn--blue" data-color="blue"></button>
+          <button class="color-btn color-btn--green" data-color="green"></button>
+          <button class="color-btn color-btn--yellow" data-color="yellow"></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="game-over" class="overlay" hidden>
+      <div class="overlay__panel">
+        <p id="game-over-message"></p>
+        <button id="play-again-btn" class="btn">Jugar de nuevo</button>
+      </div>
+    </div>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
