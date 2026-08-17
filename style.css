@@ -571,3 +571,89 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
+
+/* ============================================================
+   MULTIPLAYER: opponent selector + bots row
+   ============================================================ */
+.opp-select { display: flex; gap: 0.5rem; justify-content: center; }
+.opp-option {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  border: 2px solid rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.opp-option:hover { border-color: var(--gold); }
+.opp-option:active { transform: translateY(1px); }
+.opp-option--on { background: var(--uno-red); border-color: #fff; }
+.opp-option:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+/* Arena: seats around the table. Bots take the top corners / center-top,
+   the human sits at the bottom, the draw/discard pile in the middle. */
+.arena {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "tl t tr"
+    "center center center"
+    "you you you";
+  gap: 0.5rem;
+  align-items: center;
+}
+#center-area { grid-area: center; }
+#player-zone { grid-area: you; margin-top: 0; }
+
+.seat--tl { grid-area: tl; justify-self: start; }
+.seat--t { grid-area: t; justify-self: center; }
+.seat--tr { grid-area: tr; justify-self: end; }
+
+.cpu-player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 14px;
+  border: 2px solid transparent;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.cpu-player--active { border-color: var(--gold); background: rgba(242,193,78,0.10); }
+.cpu-player__head { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; }
+.cpu-player__name { font-family: var(--font-display); font-weight: 700; }
+.avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.92);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.8rem;
+}
+.bot-tag {
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(255,255,255,0.14);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: var(--muted);
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+}
+
+/* Bot hands are shown smaller so up to 3 fit comfortably */
+.cpu-player .card { width: calc(var(--card-w) * 0.62); height: calc(var(--card-h) * 0.62); border-width: 3px; }
+.cpu-player .fan--cpu { min-height: calc(var(--card-h) * 0.62 + 8px); padding: 6px 0 2px; }
+.cpu-player .fan--cpu .card:not(:first-child) { margin-left: calc(var(--card-w) * -0.30); }
+.cpu-player .card__logo { font-size: 0.85rem; }

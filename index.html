@@ -18,11 +18,19 @@
         <div class="logo" aria-hidden="true">
           <span class="logo__word">UNO</span>
         </div>
-        <p class="start__tag">El clásico de cartas. Tú contra la máquina.</p>
+        <p class="start__tag">El clásico de cartas. Tú contra los bots.</p>
         <form id="start-form" class="start__form" novalidate>
           <label class="start__label" for="name-input">¿Cómo te llamas?</label>
           <input id="name-input" class="start__input" type="text" maxlength="16"
                  placeholder="Tu nombre" autocomplete="off" required>
+
+          <span class="start__label">¿Contra cuántos bots?</span>
+          <div class="opp-select" role="group" aria-label="Cantidad de bots">
+            <button type="button" class="opp-option" data-count="1">1</button>
+            <button type="button" class="opp-option" data-count="2">2</button>
+            <button type="button" class="opp-option" data-count="3">3</button>
+          </div>
+
           <button type="submit" class="btn btn--primary">Jugar</button>
         </form>
       </div>
@@ -38,39 +46,36 @@
             <b id="score-player">0</b>
           </span>
           <span class="score__dash">—</span>
-          <span class="score__side"><b id="score-cpu">0</b> CPU</span>
+          <span class="score__side"><b id="score-cpu">0</b> Bots</span>
         </div>
       </header>
 
-      <section class="zone zone--cpu" id="cpu-zone">
-        <div class="zone__label">CPU <span class="count-badge" id="cpu-count">0</span></div>
-        <div id="cpu-hand" class="fan fan--cpu"></div>
-      </section>
+      <div id="arena" class="arena">
+        <section class="table" id="center-area">
+          <button id="draw-pile" class="pile pile--draw" type="button" aria-label="Robar una carta">
+            <div class="card card--back"><span class="card__logo">UNO</span></div>
+            <span class="pile__caption">Robar</span>
+          </button>
 
-      <section class="table">
-        <button id="draw-pile" class="pile pile--draw" type="button" aria-label="Robar una carta">
-          <div class="card card--back"><span class="card__logo">UNO</span></div>
-          <span class="pile__caption">Robar</span>
-        </button>
+          <div id="discard-pile" class="pile pile--discard" aria-label="Descarte"></div>
 
-        <div id="discard-pile" class="pile pile--discard" aria-label="Descarte"></div>
-
-        <div class="status">
-          <div id="turn-banner" class="banner"></div>
-          <div id="color-chip" class="chip" hidden>
-            <span class="chip__dot"></span><span id="color-chip-name" class="chip__name"></span>
+          <div class="status">
+            <div id="turn-banner" class="banner"></div>
+            <div id="color-chip" class="chip" hidden>
+              <span class="chip__dot"></span><span id="color-chip-name" class="chip__name"></span>
+            </div>
+            <button id="pass-btn" class="btn btn--ghost" type="button" hidden>Pasar turno</button>
           </div>
-          <button id="pass-btn" class="btn btn--ghost" type="button" hidden>Pasar turno</button>
-        </div>
-      </section>
+        </section>
 
-      <section class="zone zone--player" id="player-zone">
-        <div class="zone__label">
-          <span id="player-label">Tú</span>
-          <span class="points" aria-label="Puntos"><b id="points">100</b> pts</span>
-        </div>
-        <div id="player-hand" class="fan fan--player"></div>
-      </section>
+        <section class="zone zone--player" id="player-zone">
+          <div class="zone__label">
+            <span id="player-label">Tú</span>
+            <span class="points" aria-label="Puntos"><b id="points">100</b> pts</span>
+          </div>
+          <div id="player-hand" class="fan fan--player"></div>
+        </section>
+      </div>
 
       <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     </section>
