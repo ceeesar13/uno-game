@@ -1,0 +1,11 @@
+# Local AI/tooling state (not part of the project)
+.atl/
+.claude/
+.codegraph/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
