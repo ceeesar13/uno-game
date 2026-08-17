@@ -194,14 +194,65 @@ function chooseColor(state, color) {
 
 // ==== RENDER ====
 
-function render(state) {
-  document.getElementById('cpu-count').textContent = state.cpuHand.length;
-  document.getElementById('player-hand').textContent =
-    state.playerHand.map((c) => `${c.color || 'wild'}-${c.type}${c.value ?? ''}`).join(', ');
+function cardLabel(card) {
+  if (card.type === 'number') return String(card.value);
+  const labels = { skip: '⦸', reverse: '⇄', 'draw-two': '+2', wild: '★', 'wild-draw-four': '+4' };
+  return labels[card.type];
+}
+
+function createCardElement(card, { faceUp, playable }) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  if (!faceUp) {
+    el.classList.add('card--back');
+    return el;
+  }
+  el.classList.add(`card--${card.color || 'wild'}`);
+  el.textContent = cardLabel(card);
+  if (playable) el.classList.add('card--playable');
+  return el;
+}
+
+function renderHands(state) {
   const top = topOfDiscard(state);
-  document.getElementById('discard-pile').textContent = `${top.color || 'wild'}-${top.type}${top.value ?? ''}`;
-  document.getElementById('turn-indicator').textContent = state.phase;
-  renderColorPicker(state);
+  const interactive = state.phase === 'player-turn';
+  const validIds = interactive
+    ? new Set(getValidPlays(state.playerHand, state.currentColor, top).map((c) => c.id))
+    : new Set();
+
+  const playerHandEl = document.getElementById('player-hand');
+  playerHandEl.innerHTML = '';
+  for (const card of state.playerHand) {
+    const playable = interactive && validIds.has(card.id);
+    const el = createCardElement(card, { faceUp: true, playable });
+    if (playable) el.addEventListener('click', () => handlePlayerPlay(card.id));
+    playerHandEl.appendChild(el);
+  }
+
+  document.getElementById('cpu-count').textContent = state.cpuHand.length;
+  const cpuHandEl = document.getElementById('cpu-hand');
+  cpuHandEl.innerHTML = '';
+  for (let i = 0; i < state.cpuHand.length; i++) {
+    cpuHandEl.appendChild(createCardElement(null, { faceUp: false }));
+  }
+}
+
+function renderPiles(state) {
+  document.querySelector('#draw-pile .card').onclick = () => handleDrawClick();
+
+  const discardEl = document.getElementById('discard-pile');
+  discardEl.innerHTML = '';
+  discardEl.appendChild(createCardElement(topOfDiscard(state), { faceUp: true, playable: false }));
+}
+
+function renderTurnIndicator(state) {
+  const labels = {
+    'player-turn': 'Tu turno',
+    'cpu-turn': 'Turno de la CPU',
+    'color-selection': 'Eligiendo color...',
+    'game-over': 'Fin del juego',
+  };
+  document.getElementById('turn-indicator').textContent = labels[state.phase] || '';
 }
 
 function renderColorPicker(state) {
@@ -209,19 +260,26 @@ function renderColorPicker(state) {
     !(state.phase === 'color-selection' && state.pendingPlayer === 'player');
 }
 
+function render(state) {
+  renderHands(state);
+  renderPiles(state);
+  renderTurnIndicator(state);
+  renderColorPicker(state);
+}
+
 // ==== BOOTSTRAP ====
 
 let state = createInitialState();
 render(state);
 
-document.getElementById('discard-pile').addEventListener('click', () => {
-  const top = topOfDiscard(state);
-  const valid = getValidPlays(state.playerHand, state.currentColor, top).find((c) => c.type === 'number');
-  if (state.phase === 'player-turn' && valid) {
-    state = playCard(state, 'player', valid.id);
-    render(state);
-  }
-});
+function handlePlayerPlay(cardId) {
+  state = playCard(state, 'player', cardId);
+  render(state);
+}
+
+function handleDrawClick() {
+  // implemented in Task 8
+}
 
 document.querySelectorAll('.color-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
