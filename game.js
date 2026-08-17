@@ -265,24 +265,72 @@ function runCpuTurn(state) {
 }
 
 // ==== RENDER ====
+// Reads state and reflects it in the DOM. No game rules live here.
 
-function cardLabel(card) {
-  if (card.type === 'number') return String(card.value);
-  const labels = { skip: '⦸', reverse: '⇄', 'draw-two': '+2', wild: '★', 'wild-draw-four': '+4' };
-  return labels[card.type];
+const COLOR_NAMES = { red: 'Rojo', blue: 'Azul', green: 'Verde', yellow: 'Amarillo' };
+const COLOR_VARS = {
+  red: 'var(--uno-red)', blue: 'var(--uno-blue)',
+  green: 'var(--uno-green)', yellow: 'var(--uno-yellow)',
+};
+const CARD_SYMBOLS = { skip: '⊘', reverse: '⇄', 'draw-two': '+2', 'wild-draw-four': '+4' };
+
+function isWildCard(card) {
+  return card.type === 'wild' || card.type === 'wild-draw-four';
 }
 
-function createCardElement(card, { faceUp, playable }) {
+function cardGlyph(card) {
+  if (card.type === 'number') return String(card.value);
+  return CARD_SYMBOLS[card.type] || '';
+}
+
+function buildCardElement(card, { faceUp, playable, muted }) {
   const el = document.createElement('div');
   el.className = 'card';
+
   if (!faceUp) {
     el.classList.add('card--back');
+    const logo = document.createElement('span');
+    logo.className = 'card__logo';
+    logo.textContent = 'UNO';
+    el.appendChild(logo);
     return el;
   }
-  el.classList.add(`card--${card.color || 'wild'}`);
-  el.textContent = cardLabel(card);
+
+  el.classList.add('card--' + (isWildCard(card) ? 'wild' : card.color));
+
+  const oval = document.createElement('div');
+  oval.className = 'card__oval';
+  el.appendChild(oval);
+
+  const glyph = cardGlyph(card);
+  if (glyph) {
+    const value = document.createElement('div');
+    value.className = 'card__value';
+    value.textContent = glyph;
+    el.appendChild(value);
+
+    const tl = document.createElement('span');
+    tl.className = 'card__corner card__corner--tl';
+    tl.textContent = glyph;
+    el.appendChild(tl);
+
+    const br = document.createElement('span');
+    br.className = 'card__corner card__corner--br';
+    br.textContent = glyph;
+    el.appendChild(br);
+  }
+
   if (playable) el.classList.add('card--playable');
+  if (muted) el.classList.add('card--muted');
   return el;
+}
+
+function mustDrawNow(state) {
+  return (
+    state.phase === 'player-turn' &&
+    !state.hasDrawn &&
+    getValidPlays(state.playerHand, state.currentColor, topOfDiscard(state)).length === 0
+  );
 }
 
 function renderHands(state) {
@@ -296,7 +344,8 @@ function renderHands(state) {
   playerHandEl.innerHTML = '';
   for (const card of state.playerHand) {
     const playable = interactive && validIds.has(card.id);
-    const el = createCardElement(card, { faceUp: true, playable });
+    const muted = interactive && !playable;
+    const el = buildCardElement(card, { faceUp: true, playable, muted });
     if (playable) el.addEventListener('click', () => handlePlayerPlay(card.id));
     playerHandEl.appendChild(el);
   }
@@ -305,26 +354,57 @@ function renderHands(state) {
   const cpuHandEl = document.getElementById('cpu-hand');
   cpuHandEl.innerHTML = '';
   for (let i = 0; i < state.cpuHand.length; i++) {
-    cpuHandEl.appendChild(createCardElement(null, { faceUp: false }));
+    cpuHandEl.appendChild(buildCardElement(null, { faceUp: false }));
   }
 }
 
 function renderPiles(state) {
-  document.querySelector('#draw-pile .card').onclick = () => handleDrawClick();
+  document.getElementById('draw-pile').classList.toggle('is-required', mustDrawNow(state));
 
   const discardEl = document.getElementById('discard-pile');
+  const top = topOfDiscard(state);
   discardEl.innerHTML = '';
-  discardEl.appendChild(createCardElement(topOfDiscard(state), { faceUp: true, playable: false }));
+  const el = buildCardElement(top, { faceUp: true, playable: false });
+  if (top.id !== prevDiscardId) el.classList.add('card--pop');
+  discardEl.appendChild(el);
+  prevDiscardId = top.id;
 }
 
-function renderTurnIndicator(state) {
-  const labels = {
-    'player-turn': 'Tu turno',
-    'cpu-turn': 'Turno de la CPU',
-    'color-selection': 'Eligiendo color...',
-    'game-over': 'Fin del juego',
-  };
-  document.getElementById('turn-indicator').textContent = labels[state.phase] || '';
+function renderBanner(state) {
+  const banner = document.getElementById('turn-banner');
+  banner.className = 'banner';
+
+  if (state.phase === 'player-turn') {
+    banner.classList.add('banner--you');
+    banner.textContent = mustDrawNow(state)
+      ? 'No tienes jugada. Toma una carta.'
+      : `Te toca, ${playerName}`;
+  } else if (state.phase === 'cpu-turn') {
+    banner.classList.add('banner--cpu');
+    banner.innerHTML = 'Juega la CPU<span class="banner__dots"></span>';
+  } else if (state.phase === 'color-selection') {
+    if (state.pendingPlayer === 'cpu') {
+      banner.classList.add('banner--cpu');
+      banner.textContent = 'La CPU elige color…';
+    } else {
+      banner.classList.add('banner--you');
+      banner.textContent = 'Elige un color';
+    }
+  } else {
+    banner.textContent = '';
+  }
+}
+
+function renderColorChip(state) {
+  const chip = document.getElementById('color-chip');
+  const active = state.phase === 'player-turn' || state.phase === 'cpu-turn';
+  if (!active || !state.currentColor) {
+    chip.hidden = true;
+    return;
+  }
+  chip.hidden = false;
+  chip.querySelector('.chip__dot').style.background = COLOR_VARS[state.currentColor];
+  document.getElementById('color-chip-name').textContent = COLOR_NAMES[state.currentColor];
 }
 
 function renderColorPicker(state) {
@@ -336,28 +416,80 @@ function renderPassButton(state) {
   document.getElementById('pass-btn').hidden = !(state.phase === 'player-turn' && state.hasDrawn);
 }
 
+function renderScore() {
+  document.getElementById('score-player-name').textContent = playerName;
+  document.getElementById('score-player').textContent = scores.player;
+  document.getElementById('score-cpu').textContent = scores.cpu;
+  document.getElementById('player-label').textContent = playerName;
+}
+
 function renderGameOver(state) {
   const el = document.getElementById('game-over');
   el.hidden = state.phase !== 'game-over';
-  if (state.phase === 'game-over') {
-    document.getElementById('game-over-message').textContent =
-      state.winner === 'player' ? '¡Ganaste!' : 'Ganó la CPU';
+  if (state.phase !== 'game-over') return;
+
+  if (!scored) {
+    scores[state.winner === 'player' ? 'player' : 'cpu'] += 1;
+    scored = true;
+    persist();
+    renderScore();
   }
+
+  document.getElementById('game-over-message').textContent =
+    state.winner === 'player' ? `¡Ganaste, ${playerName}!` : 'Ganó la CPU';
+  document.getElementById('game-over-score').textContent =
+    `${playerName} ${scores.player} — ${scores.cpu} CPU`;
 }
 
 function render(state) {
   renderHands(state);
   renderPiles(state);
-  renderTurnIndicator(state);
+  renderBanner(state);
+  renderColorChip(state);
   renderColorPicker(state);
   renderPassButton(state);
   renderGameOver(state);
 }
 
+// ==== APP STATE + PERSISTENCE ====
+
+let state = null;
+let playerName = 'Jugador';
+let scores = { player: 0, cpu: 0 };
+let scored = false;
+let prevDiscardId = null;
+
+function loadPersisted() {
+  try {
+    const savedName = localStorage.getItem('uno.name');
+    if (savedName) playerName = savedName;
+    const savedScores = localStorage.getItem('uno.scores');
+    if (savedScores) scores = JSON.parse(savedScores);
+  } catch (e) {
+    /* localStorage unavailable — play without persistence */
+  }
+}
+
+function persist() {
+  try {
+    localStorage.setItem('uno.name', playerName);
+    localStorage.setItem('uno.scores', JSON.stringify(scores));
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 // ==== BOOTSTRAP ====
 
-let state = createInitialState();
-render(state);
+function startGame() {
+  state = createInitialState();
+  scored = false;
+  prevDiscardId = null;
+  renderScore();
+  render(state);
+  document.getElementById('start-screen').hidden = true;
+  document.getElementById('game-screen').hidden = false;
+}
 
 function runCpuTurnAndRender() {
   state = runCpuTurn(state);
@@ -383,6 +515,21 @@ function handleDrawClick() {
   render(state);
 }
 
+loadPersisted();
+
+const nameInput = document.getElementById('name-input');
+if (playerName && playerName !== 'Jugador') nameInput.value = playerName;
+
+document.getElementById('start-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const entered = nameInput.value.trim();
+  playerName = entered || 'Jugador';
+  persist();
+  startGame();
+});
+
+document.getElementById('draw-pile').addEventListener('click', handleDrawClick);
+
 document.getElementById('pass-btn').addEventListener('click', () => {
   if (state.phase !== 'player-turn' || !state.hasDrawn) return;
   state = passTurn(state);
@@ -403,5 +550,7 @@ document.querySelectorAll('.color-btn').forEach((btn) => {
 
 document.getElementById('play-again-btn').addEventListener('click', () => {
   state = createInitialState();
+  scored = false;
+  prevDiscardId = null;
   render(state);
 });

@@ -4,49 +4,94 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>UNO</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main id="game">
-    <section class="cpu-area">
-      <div class="hand-label">CPU (<span id="cpu-count">0</span> cartas)</div>
-      <div id="cpu-hand" class="hand hand--cpu"></div>
-    </section>
+  <div id="app">
 
-    <section class="table">
-      <div id="draw-pile" class="pile pile--draw">
-        <div class="card card--back"></div>
+    <!-- ============ START SCREEN ============ -->
+    <section id="start-screen" class="screen">
+      <div class="start">
+        <div class="logo" aria-hidden="true">
+          <span class="logo__word">UNO</span>
+        </div>
+        <p class="start__tag">El clásico de cartas. Tú contra la máquina.</p>
+        <form id="start-form" class="start__form" novalidate>
+          <label class="start__label" for="name-input">¿Cómo te llamas?</label>
+          <input id="name-input" class="start__input" type="text" maxlength="16"
+                 placeholder="Tu nombre" autocomplete="off" required>
+          <button type="submit" class="btn btn--primary">Jugar</button>
+        </form>
       </div>
-      <div id="discard-pile" class="pile pile--discard"></div>
-      <div id="turn-indicator" class="turn-indicator"></div>
     </section>
 
-    <section class="player-area">
-      <div class="hand-label">Tu mano</div>
-      <div id="player-hand" class="hand hand--player"></div>
-      <button id="pass-btn" class="btn" hidden>Pasar turno</button>
+    <!-- ============ GAME SCREEN ============ -->
+    <section id="game-screen" class="screen" hidden>
+      <header class="topbar">
+        <div class="brand"><span class="brand__mark">UNO</span></div>
+        <div class="score" aria-label="Marcador">
+          <span class="score__side">
+            <span class="score__name" id="score-player-name">Tú</span>
+            <b id="score-player">0</b>
+          </span>
+          <span class="score__dash">—</span>
+          <span class="score__side"><b id="score-cpu">0</b> CPU</span>
+        </div>
+      </header>
+
+      <section class="zone zone--cpu" id="cpu-zone">
+        <div class="zone__label">CPU <span class="count-badge" id="cpu-count">0</span></div>
+        <div id="cpu-hand" class="fan fan--cpu"></div>
+      </section>
+
+      <section class="table">
+        <button id="draw-pile" class="pile pile--draw" type="button" aria-label="Tomar carta">
+          <div class="card card--back"><span class="card__logo">UNO</span></div>
+        </button>
+
+        <div id="discard-pile" class="pile pile--discard" aria-label="Descarte"></div>
+
+        <div class="status">
+          <div id="turn-banner" class="banner"></div>
+          <div id="color-chip" class="chip" hidden>
+            <span class="chip__dot"></span><span id="color-chip-name" class="chip__name"></span>
+          </div>
+          <button id="pass-btn" class="btn btn--ghost" type="button" hidden>Pasar</button>
+        </div>
+      </section>
+
+      <section class="zone zone--player" id="player-zone">
+        <div class="zone__label" id="player-label">Tú</div>
+        <div id="player-hand" class="fan fan--player"></div>
+      </section>
     </section>
 
+    <!-- ============ COLOR PICKER ============ -->
     <div id="color-picker" class="overlay" hidden>
       <div class="overlay__panel">
-        <p>Elige un color</p>
-        <div>
-          <button class="color-btn color-btn--red" data-color="red"></button>
-          <button class="color-btn color-btn--blue" data-color="blue"></button>
-          <button class="color-btn color-btn--green" data-color="green"></button>
-          <button class="color-btn color-btn--yellow" data-color="yellow"></button>
+        <p class="overlay__title">Elige un color</p>
+        <div class="color-grid">
+          <button class="color-btn color-btn--red" type="button" data-color="red" aria-label="Rojo"></button>
+          <button class="color-btn color-btn--blue" type="button" data-color="blue" aria-label="Azul"></button>
+          <button class="color-btn color-btn--green" type="button" data-color="green" aria-label="Verde"></button>
+          <button class="color-btn color-btn--yellow" type="button" data-color="yellow" aria-label="Amarillo"></button>
         </div>
       </div>
     </div>
 
+    <!-- ============ GAME OVER ============ -->
     <div id="game-over" class="overlay" hidden>
       <div class="overlay__panel">
-        <p id="game-over-message"></p>
-        <button id="play-again-btn" class="btn">Jugar de nuevo</button>
+        <p id="game-over-message" class="overlay__title"></p>
+        <p id="game-over-score" class="overlay__sub"></p>
+        <button id="play-again-btn" class="btn btn--primary" type="button">Jugar de nuevo</button>
       </div>
     </div>
-  </main>
 
+  </div>
   <script src="game.js"></script>
 </body>
 </html>
