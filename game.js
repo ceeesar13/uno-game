@@ -297,13 +297,17 @@ function runCpuTurn(state) {
   const valid = getValidPlays(state.players[idx].hand, state.currentColor, topOfDiscard(state));
 
   if (valid.length === 0) {
+    // Official rule: draw one, then you may only play THAT card (if legal).
     const drawn = drawForCurrent(state);
-    const nowValid = getValidPlays(drawn.players[idx].hand, drawn.currentColor, topOfDiscard(drawn));
-    if (nowValid.length === 0) {
-      return { state: passTurn(drawn), event: { kind: 'draw-pass', playerIndex: idx } };
+    const hand = drawn.players[idx].hand;
+    const drawnCard = hand[hand.length - 1];
+    const legal = drawnCard && (drawnCard.type === 'wild-draw-four'
+      ? canPlayWildDrawFour(hand, drawn.currentColor)
+      : isValidPlay(drawnCard, drawn.currentColor, topOfDiscard(drawn)));
+    if (legal) {
+      return { state: playCpuCard(drawn, idx, drawnCard), event: { kind: 'play', card: drawnCard, playerIndex: idx, drew: true } };
     }
-    const card = chooseCpuCard(nowValid, drawn, idx, style);
-    return { state: playCpuCard(drawn, idx, card), event: { kind: 'play', card, playerIndex: idx, drew: true } };
+    return { state: passTurn(drawn), event: { kind: 'draw-pass', playerIndex: idx } };
   }
 
   const card = chooseCpuCard(valid, state, idx, style);
@@ -721,6 +725,7 @@ let lastPlaySource = 'human';
 let opponentCount = 1;
 let thinkingIndex = null; // which bot is currently "thinking"
 let bubbles = {}; // player index -> speech-bubble text
+let drawnCardId = null; // after the human draws, only this card may be played
 
 // Bot-turn pacing: a deliberate think beat, then the play, so each bot
 // turn reads as a moment instead of a blink.
@@ -759,6 +764,7 @@ function newRound() {
   lastPlaySource = 'human';
   thinkingIndex = null;
   bubbles = {};
+  drawnCardId = null;
   prevDiscardId = topOfDiscard(state).id;
   render(state);
 }
@@ -840,6 +846,20 @@ function handlePlayerAttempt(cardId) {
   const card = state.players[0].hand.find((c) => c.id === cardId);
   if (!card) return;
 
+  // After drawing, only the freshly drawn card may be played.
+  if (state.hasDrawn && cardId !== drawnCardId) {
+    showToast('Ya robaste: solo puedes jugar la carta robada, o pasar el turno.', 'bad');
+    return;
+  }
+
+  // Wild Draw Four is only legal when you hold no card of the active colour.
+  if (card.type === 'wild-draw-four' && !canPlayWildDrawFour(state.players[0].hand, state.currentColor)) {
+    roundPoints = Math.max(0, roundPoints - PENALTY);
+    renderPoints();
+    showToast(`No puedes jugar +4: todavía tienes cartas ${COLOR_NAMES[state.currentColor]}. −${PENALTY} pts`, 'bad');
+    return;
+  }
+
   if (!isValidPlay(card, state.currentColor, topOfDiscard(state))) {
     roundPoints = Math.max(0, roundPoints - PENALTY);
     renderPoints();
@@ -865,6 +885,8 @@ function handlePlayerAttempt(cardId) {
 function handleDrawClick() {
   if (state.phase !== 'turn' || state.currentPlayer !== 0 || state.hasDrawn) return;
   state = drawForCurrent(state);
+  const hand = state.players[0].hand;
+  drawnCardId = hand[hand.length - 1].id;
   render(state);
   showToast('Robaste una carta. Juégala si puedes o pasa el turno.', 'special');
 }
